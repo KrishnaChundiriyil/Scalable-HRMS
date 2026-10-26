@@ -22,7 +22,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.limiter=limiter; this.mapper=mapper;
     }
     @Override protected boolean shouldNotFilter(HttpServletRequest request) {
-        boolean mutation = request.getMethod().equals("POST") || request.getMethod().equals("PUT");
+        boolean mutation = request.getMethod().equals("POST") || request.getMethod().equals("PUT")
+            || request.getMethod().equals("DELETE") || request.getMethod().equals("PATCH");
         return !mutation || !(request.getRequestURI().startsWith("/api/leaves/") ||
                                  request.getRequestURI().equals("/api/leaves") ||
                                  request.getRequestURI().startsWith("/api/dev/"));
@@ -34,14 +35,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
             chain.doFilter(request, response); return;
         }
         try {
-            if (!limiter.allow(auth.getName())) {
+            long retry = limiter.retryAfterSeconds(auth.getName());
+            if (retry > 0) {
                 response.setStatus(429);
+                response.setHeader("Retry-After", Long.toString(retry));
                 response.setContentType(MediaType.APPLICATION_JSON_VALUE);
                 response.getWriter().write(mapper.writeValueAsString(Map.of("error", "Too Many Requests")));
                 return;
             }
         } catch (Exception failure) {
             response.setStatus(503);
+            response.setHeader("Retry-After", "1");
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.getWriter().write(mapper.writeValueAsString(Map.of("error", "Rate limiting unavailable")));
             return;

@@ -5,6 +5,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 @Document(collection="hr_notifications")
+@org.springframework.data.mongodb.core.index.CompoundIndex(name="recipient_history", def="{'recipientId':1,'createdAt':1,'_id':1}")
 public class HrNotification {
     @Id private String id;
     private String recipientId;

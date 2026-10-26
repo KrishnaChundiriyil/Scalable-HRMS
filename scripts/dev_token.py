@@ -17,7 +17,9 @@ def b64(obj):
     return base64.urlsafe_b64encode(obj).rstrip(b'=').decode()
 now = int(time.time())
 header = b64({'alg':'HS256','typ':'JWT'})
-payload = b64({'sub':a.subject,'roles':[a.role],'iat':now,'exp':now+3600})
+payload = b64({'sub':a.subject,'roles':[a.role],'iat':now,'exp':now+3600,
+              'iss':os.getenv('HRMS_JWT_ISSUER','hrms-employee-service'),
+              'aud':os.getenv('HRMS_JWT_AUDIENCE','hrms-leave-service')})
 signed = f'{header}.{payload}'
 sig = b64(hmac.new(secret,signed.encode(),hashlib.sha256).digest())
 print(signed+'.'+sig)

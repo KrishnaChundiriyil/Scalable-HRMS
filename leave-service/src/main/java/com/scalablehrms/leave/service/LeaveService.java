@@ -1,164 +1,196 @@
 package com.scalablehrms.leave.service;
 
+import com.scalablehrms.leave.config.LeavePolicy;
 import com.scalablehrms.leave.domain.*;
 import com.scalablehrms.leave.dto.*;
-import com.scalablehrms.leave.repo.LeaveLedgerRepository;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
+import com.scalablehrms.leave.repo.LeaveAccountRepository;
+import java.time.*;
 import java.util.*;
-import java.util.stream.Stream;
-import org.springframework.beans.factory.annotation.Value;
+import java.util.function.Function;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class LeaveService {
-    private final LeaveLedgerRepository ledgers;
-    private final MongoTemplate mongo;
-    private final NotificationService notifications;
-    private final int annualDays;
-    private final int sickDays;
+    private final LeaveAccountRepository accounts;
+    private final AccountStore store;
+    private final LeavePolicy policy;
 
-    public LeaveService(LeaveLedgerRepository ledgers, MongoTemplate mongo, NotificationService notifications,
-                        @Value("${hrms.leave.annual-days:20}") int annualDays,
-                        @Value("${hrms.leave.sick-days:10}") int sickDays) {
-        this.ledgers = ledgers;
-        this.mongo = mongo;
-        this.notifications = notifications;
-        this.annualDays = annualDays;
-        this.sickDays = sickDays;
+    public LeaveService(LeaveAccountRepository accounts, AccountStore store, LeavePolicy policy) {
+        this.accounts = accounts;
+        this.store = store;
+        this.policy = policy;
     }
 
-    private int allowance(LeaveType type) { return type == LeaveType.ANNUAL ? annualDays : sickDays; }
-    private String ledgerId(String employeeId, int year, LeaveType type) {
-        return employeeId + ":" + year + ":" + type.name();
+    /** One version-checked replacement atomically commits request, derived balances and outbox. */
+    private LeaveView mutate(String employee, Function<LeaveAccount, LeaveRequest> operation) {
+        for (int attempt = 0; attempt < 12; attempt++) {
+            LeaveAccount account = store.load(employee);
+            LeaveRequest result = operation.apply(account);
+            if (account.outbox().size() > 1000) throw conflict("Notification backlog; please retry later");
+            try {
+                accounts.save(account);
+                return LeaveView.of(employee, result);
+            } catch (OptimisticLockingFailureException | DuplicateKeyException concurrent) {
+                // Re-read and re-check overlap/balance/status against the winning write.
+            }
+        }
+        throw conflict("Concurrent updates; please retry");
     }
 
-    public LeaveView submit(String employeeId, CreateLeaveRequest input) {
-        LocalDate start = input.startDate(), end = input.endDate();
-        if (end.isBefore(start)) throw new IllegalArgumentException("End date cannot precede start date");
-        if (start.isBefore(LocalDate.now())) throw new IllegalArgumentException("Cannot request leave starting in the past");
-        if (start.getYear() != end.getYear())
-            throw new IllegalArgumentException("Submit separate leave requests for different calendar years");
-        int days = Math.toIntExact(ChronoUnit.DAYS.between(start, end) + 1);
-        if (days > allowance(input.type()))
-            throw new IllegalArgumentException("Requested days exceed annual entitlement for this leave type");
-        String key = ledgerId(employeeId, start.getYear(), input.type());
-        LeaveEntry e = new LeaveEntry();
-        e.setId(UUID.randomUUID().toString());
-        e.setStartDate(start);
-        e.setEndDate(end);
-        e.setDays(days);
-        e.setReason(input.reason().trim());
-        e.setStatus(LeaveStatus.PENDING);
-        e.setCreatedAt(Instant.now());
-
-        // @Version makes concurrent additions to one employee's ledger conflict rather than overwrite.
-        for (int attempt = 0; attempt < 7; attempt++) {
-            // Also prevent a person booking annual leave while already on sick leave.
-            // The check is against persisted data; a future cross-type concurrency lock
-            // is needed for strict parallel requests affecting different ledgers.
-            for (LeaveLedger other : ledgers.findByEmployeeId(employeeId)) {
-                if (other.getYear() == start.getYear() && other.getType() != input.type()) {
-                    for (LeaveEntry prior : other.getRequests()) {
-                        if (prior.getStatus() != LeaveStatus.REJECTED &&
-                            !end.isBefore(prior.getStartDate()) && !start.isAfter(prior.getEndDate())) {
-                            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                                "Overlapping leave of another type exists");
-                        }
+    public LeaveView submit(String employee, CreateLeaveRequest input, String idempotencyKey) {
+        String reason = text(input.reason(), "Reason");
+        if (idempotencyKey != null && !idempotencyKey.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new IllegalArgumentException("Invalid Idempotency-Key");
+        return mutate(employee, account -> {
+            if (idempotencyKey != null) {
+                for (LeaveRequest prior : account.requests()) {
+                    if (idempotencyKey.equals(prior.idempotencyKey())) {
+                        if (!prior.type().equals(input.type()) || !prior.startDate().equals(input.startDate())
+                            || !prior.endDate().equals(input.endDate()) || !prior.reason().equals(reason))
+                            throw conflict("Idempotency-Key was already used for another request");
+                        return prior;
                     }
                 }
             }
-            LeaveLedger ledger = ledgers.findById(key).orElseGet(
-                () -> LeaveLedger.fresh(employeeId, start.getYear(), input.type(), allowance(input.type())));
-            for (LeaveEntry previous : ledger.getRequests()) {
-                if (previous.getStatus() != LeaveStatus.REJECTED &&
-                    !end.isBefore(previous.getStartDate()) && !start.isAfter(previous.getEndDate())) {
-                    throw new ResponseStatusException(HttpStatus.CONFLICT, "Overlapping pending or approved leave exists");
-                }
+            var charges = policy.chargedDays(input.type(), input.startDate(), input.endDate());
+            var rule = policy.rule(input.type());
+            if (account.requests().size() >= policy.getMaxRequests())
+                throw conflict("Employee history capacity reached; administrator archival required");
+            for (LeaveRequest prior : account.requests()) {
+                if ((prior.status() == LeaveStatus.PENDING || prior.status() == LeaveStatus.APPROVED)
+                    && !input.endDate().isBefore(prior.startDate()) && !input.startDate().isAfter(prior.endDate()))
+                    throw conflict("Overlapping pending or approved leave exists");
             }
-            ledger.getRequests().add(e);
-            try {
-                ledgers.save(ledger);
-                return LeaveView.of(employeeId, input.type(), e);
-            } catch (OptimisticLockingFailureException | DuplicateKeyException concurrentChange) {
-                // Retry against the latest ledger snapshot; conflicts are checked again above.
-            }
-        }
-        throw new ResponseStatusException(HttpStatus.CONFLICT, "Concurrent update; please retry");
+            // Pending requests do not reserve balance, but a request must fit the current balance.
+            ensureBalance(account, input.type(), charges);
+            charges.keySet().forEach(year -> account.allowances().putIfAbsent(year + ":" + input.type(), rule.yearlyAllowance()));
+            var request = new LeaveRequest(UUID.randomUUID().toString(), input.type(), input.startDate(), input.endDate(),
+                charges.values().stream().mapToInt(Integer::intValue).sum(), charges, rule.paid(), reason,
+                LeaveStatus.PENDING, Instant.now(), null, null, null, null, null, null, idempotencyKey);
+            account.requests().add(request);
+            return request;
+        });
     }
 
-    public List<LeaveView> mine(String employeeId, Integer year) {
-        return ledgers.findByEmployeeId(employeeId).stream()
-            .filter(l -> year == null || l.getYear() == year)
-            .flatMap(l -> l.getRequests().stream().map(e -> LeaveView.of(employeeId, l.getType(), e)))
-            .sorted(Comparator.comparing(LeaveView::createdAt).reversed()).toList();
+    public LeaveView decide(String employee, String id, DecisionRequest input, String reviewer) {
+        if (employee.equals(reviewer)) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot approve your own leave");
+        if (input.approve() == null) throw new IllegalArgumentException("approve is required");
+        String rejection = input.approve() ? null : text(input.rejectionReason(), "Rejection reason");
+        return mutate(employee, account -> {
+            LeaveRequest prior = find(account, id);
+            if (prior.status() != LeaveStatus.PENDING) throw conflict("Only pending leave can be decided");
+            if (prior.startDate().isBefore(policy.today())) throw conflict("Leave has already started");
+            String eligibility = input.eligibilityNote();
+            if (input.approve()) {
+                ensureBalance(account, prior.type(), prior.chargedDays());
+                if (policy.rule(prior.type()).eligibilityReviewRequired())
+                    eligibility = text(eligibility, "Eligibility review note");
+            }
+            var decided = prior.decided(input.approve(), reviewer, rejection, eligibility);
+            account.requests().set(account.requests().indexOf(prior), decided);
+            enqueue(account, id, input.approve() ? "Your leave request was approved" : "Your leave request was rejected: " + rejection);
+            return decided;
+        });
     }
 
-    public Map<String, Object> balance(String employeeId, int year) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("employeeId", employeeId);
+    public LeaveView cancel(String employee, String id, String reason) {
+        String why = text(reason, "Cancellation reason");
+        return mutate(employee, account -> {
+            LeaveRequest prior = find(account, id);
+            if (prior.status() != LeaveStatus.PENDING && prior.status() != LeaveStatus.APPROVED)
+                throw conflict("Only pending or approved leave can be cancelled");
+            if (!policy.today().isBefore(prior.startDate()))
+                throw conflict("Cancellation is allowed only before the leave start date");
+            var cancelled = prior.cancelled(why);
+            account.requests().set(account.requests().indexOf(prior), cancelled);
+            enqueue(account, id, "Your leave request was cancelled");
+            return cancelled;
+        });
+    }
+
+    private void enqueue(LeaveAccount account, String leaveId, String message) {
+        account.outbox().add(new HrNotification(UUID.randomUUID().toString(), account.id(), leaveId, message, Instant.now()));
+    }
+
+    private int allowance(LeaveAccount account, String type, String year) {
+        return account.allowances().getOrDefault(year + ":" + type, policy.rule(type).yearlyAllowance());
+    }
+
+    private int used(LeaveAccount account, String type, String year) {
+        return account.requests().stream().filter(r -> r.type().equals(type) && r.status() == LeaveStatus.APPROVED)
+            .mapToInt(r -> r.chargedDays().getOrDefault(year, 0)).sum();
+    }
+
+    private void ensureBalance(LeaveAccount account, String type, Map<String,Integer> charges) {
+        charges.forEach((year, days) -> {
+            int allowance = allowance(account, type, year);
+            if (allowance >= 0 && used(account, type, year) + days > allowance)
+                throw conflict("Insufficient " + type + " balance for " + year);
+        });
+    }
+
+    public Map<String,Object> balance(String employee, int year) {
+        validYear(year);
+        LeaveAccount account = store.load(employee);
+        Map<String,Object> result = new LinkedHashMap<>();
+        result.put("employeeId", employee);
         result.put("year", year);
-        for (LeaveType t : LeaveType.values()) {
-            LeaveLedger ledger = ledgers.findById(ledgerId(employeeId, year, t)).orElse(null);
-            int entitled = ledger == null ? allowance(t) : ledger.getAllowance();
-            result.put(t.name().toLowerCase(Locale.ROOT),
-                Map.of("entitled", entitled, "used", entitled - (ledger == null ? entitled : ledger.getRemainingDays()),
-                       "remaining", ledger == null ? entitled : ledger.getRemainingDays()));
-        }
+        policy.getTypes().forEach((type, rule) -> {
+            int entitled = allowance(account, type, Integer.toString(year));
+            int used = used(account, type, Integer.toString(year));
+            var value = new LinkedHashMap<String,Object>();
+            value.put("entitled", entitled < 0 ? null : entitled);
+            value.put("used", used);
+            value.put("remaining", entitled < 0 ? null : Math.max(0, entitled - used));
+            value.put("maxPerRequest", rule.maxPerRequest());
+            value.put("limitScope", entitled < 0 ? "PER_REQUEST" : "YEARLY");
+            value.put("paid", rule.paid());
+            value.put("counting", rule.counting());
+            result.put(type.toLowerCase(Locale.ROOT), value);
+        });
         return result;
     }
 
+    public List<LeaveView> mine(String employee, Integer year) {
+        if (year != null) validYear(year);
+        return store.load(employee).requests().stream().filter(r -> inYear(r, year))
+            .map(r -> LeaveView.of(employee, r)).sorted(Comparator.comparing(LeaveView::createdAt).reversed()).toList();
+    }
+
     public List<LeaveView> pending(int year) {
-        return ledgers.findByYear(year).stream()
-            .flatMap(l -> l.getRequests().stream()
-                .filter(e -> e.getStatus() == LeaveStatus.PENDING)
-                .map(e -> LeaveView.of(l.getEmployeeId(), l.getType(), e)))
+        validYear(year);
+        return store.all().stream().flatMap(a -> a.requests().stream()
+            .filter(r -> r.status() == LeaveStatus.PENDING && inYear(r, year)).map(r -> LeaveView.of(a.id(), r)))
             .sorted(Comparator.comparing(LeaveView::createdAt)).toList();
     }
 
-    public LeaveView decide(String employeeId, String leaveId, boolean approve, String managerId) {
-        // The ledger lives in ONE Mongo document: balance deduction + status transition is atomic.
-        LeaveLedger ledger = ledgers.findByEmployeeId(employeeId).stream()
-            .filter(l -> l.getRequests().stream().anyMatch(e -> e.getId().equals(leaveId)))
-            .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Leave not found"));
-        LeaveEntry entry = ledger.getRequests().stream().filter(e -> e.getId().equals(leaveId))
-            .findFirst().orElseThrow();
-        if (entry.getStatus() != LeaveStatus.PENDING)
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Leave was already decided");
+    public List<LeaveView> approved(String employee, LocalDate from, LocalDate to) {
+        if (from == null || to == null || to.isBefore(from) || to.isAfter(from.plusDays(366)))
+            throw new IllegalArgumentException("Payroll range must be ordered and no longer than 366 days");
+        return mine(employee, null).stream().filter(r -> r.status() == LeaveStatus.APPROVED
+            && !r.endDate().isBefore(from) && !r.startDate().isAfter(to)).toList();
+    }
 
-        Criteria match = Criteria.where("_id").is(ledger.getId())
-            .and("requests").elemMatch(Criteria.where("id").is(leaveId).and("status").is(LeaveStatus.PENDING));
-        if (approve) match = match.and("remainingDays").gte(entry.getDays());
-        Query q = new Query(match);
-        Update update = new Update().set("requests.$.status", approve ? LeaveStatus.APPROVED : LeaveStatus.REJECTED)
-            .set("requests.$.reviewedBy", managerId)
-            .set("requests.$.decidedAt", Instant.now())
-            .inc("version", 1);
-        if (approve) update.inc("remainingDays", -entry.getDays());
-        LeaveLedger after = mongo.findAndModify(q, update,
-            FindAndModifyOptions.options().returnNew(true), LeaveLedger.class);
-        if (after == null) throw new ResponseStatusException(HttpStatus.CONFLICT,
-            "Request changed concurrently or insufficient leave balance");
-        LeaveEntry saved = after.getRequests().stream().filter(e -> e.getId().equals(leaveId))
-            .findFirst().orElseThrow();
-        try {
-            notifications.recordAndPublish(employeeId, leaveId,
-                approve ? "Your leave request was approved" : "Your leave request was rejected");
-        } catch (RuntimeException notificationFailure) {
-            // The decision remains valid. UI can still query the definitive leave status.
-            org.slf4j.LoggerFactory.getLogger(LeaveService.class)
-                .error("Leave decision saved, notification delivery failed for {}", leaveId, notificationFailure);
-        }
-        return LeaveView.of(employeeId, after.getType(), saved);
+    private boolean inYear(LeaveRequest request, Integer year) {
+        return year == null || (request.startDate().getYear() <= year && request.endDate().getYear() >= year);
+    }
+    private void validYear(int year) {
+        if (year < 2000 || year > 2200) throw new IllegalArgumentException("Year must be between 2000 and 2200");
+    }
+    private LeaveRequest find(LeaveAccount account, String id) {
+        return account.requests().stream().filter(r -> r.id().equals(id)).findFirst()
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Leave not found"));
+    }
+    private static String text(String value, String name) {
+        if (value == null || value.trim().length() < 5 || value.trim().length() > 500)
+            throw new IllegalArgumentException(name + " must contain 5 to 500 non-padding characters");
+        return value.trim();
+    }
+    private static ResponseStatusException conflict(String message) {
+        return new ResponseStatusException(HttpStatus.CONFLICT, message);
     }
 }

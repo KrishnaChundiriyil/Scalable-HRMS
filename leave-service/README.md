@@ -1,65 +1,74 @@
-# HRMS Leave Service — Backend Only
+# Leave Management and Reliability backend
 
-**Actual persistence, no mock Employee Service, no bundled frontend.** React comes later.
+Java 21, Spring Boot 3.5.16, MongoDB, Redis Lua token bucket, Resilience4j and SSE.
+This is Person 2's backend only. No frontend or production fake Employee Service
+is included.
 
-## Stack
-Java 21, Spring Boot 3.5.16, Spring Security JWT resource server, MongoDB, Redis, Resilience4j, SSE.
-
-## Main APIs
-
-| Verb | Route | Who | Purpose |
-|---|---|---|---|
-| POST | `/api/leaves` | Authenticated employee | Submit a leave request for **the employee ID from JWT `sub`** |
-| GET | `/api/leaves/me?year=2026` | Employee | Own requests |
-| GET | `/api/leaves/me/balance?year=2026` | Employee | Annual and sick balances |
-| GET | `/api/leaves/pending?year=2026` | Manager/HR/Admin | Pending leave approvals |
-| GET | `/api/leaves/employees/{employeeId}?year=2026` | Manager/HR/Admin | Employee leave history for HR and payroll integration |
-| PUT | `/api/leaves/{employeeId}/{leaveId}/decision` | Manager/HR/Admin | Approve or reject; no self-approval |
-| GET | `/api/leaves/notifications` | Employee | Durable notification history |
-| GET | `/api/leaves/notifications/stream` | Employee | Live SSE stream |
-| GET | `/api/leaves/me/employee-profile` | Employee | Reads Person 1 real Employee Service through Resilience4j |
-| GET | `/actuator/health` | Anyone | Health status |
-| POST | `/api/dev/rate-test` | Signed JWT, dev profile only | Rate limiting test without business mutations |
-
-### Example request
-
-`POST http://localhost:8081/api/leaves`
-```json
-{"type":"ANNUAL","startDate":"2026-11-02","endDate":"2026-11-03","reason":"Family appointment"}
-```
-
-No `employeeId` in request body; it comes from the authenticated JWT. Dates must be future dates, inside the same calendar year, and are counted as calendar days inclusive (weekend/holiday policies are integration decisions).
-
-## Local installation
+## Start locally
 
 From the repository root:
 
 ```bash
 bash scripts/setup_local_env.sh
-set -a; source .env; set +a
+set -a
+source .env
+set +a
 docker compose -f infrastructure/docker-compose-dev.yml up -d
 cd leave-service
-mvn clean test
-mvn spring-boot:run
+mvn clean verify
+mvn spring-boot:run -Dspring-boot.run.arguments=--server.address=127.0.0.1
 ```
 
-The first Maven build downloads packages and needs an internet connection. `HRMS_JWT_SECRET_BASE64` must exist in your environment or the application will not start.
+Open <http://localhost:8081/actuator/health>. Health does not mean Employee Service
+is available: actual submissions/cancellations/manager operations require Person
+1's service on EMPLOYEE_SERVICE_URL. Until then they fail safely; run clean verify
+for a complete isolated MongoDB/Redis/API test without that teammate's server.
 
-Open a **second terminal** at repository root:
+`.env.example` lists settings; setup_local_env.sh generates a private HMAC key.
+Person 1 must use the same development signing key, issuer and audience, or supply
+JWKS/RS256 configuration. Never commit .env or access tokens.
+
+## Policy and API
+
+Seven editable types: Annual, Sick, Casual, Bereavement, Paternity, Maternity and
+Unpaid. Ordinary leave counts Monday–Friday excluding configured company holidays.
+Maternity/unpaid use calendar days. Pending requests do not reserve balance;
+approval deducts, and pre-start cancellation refunds. Parental approval records
+an eligibility review. See `../docs/LEAVE_POLICY.md` for exact defaults and limits.
+
+Read `../docs/INTEGRATION_CONTRACTS.md` for every endpoint and JWT contract. Import
+`../docs/postman/Scalable-HRMS-Leave.postman_collection.json` for business requests.
+The normal flow is POST /api/leaves -> manager PUT decision -> GET balance/history/
+notifications -> optional POST /api/leaves/me/{id}/cancel before start.
+
+## Docker application profile
+
+With the old host Java application stopped, from repository root:
 
 ```bash
-set -a; source .env; set +a
-./scripts/dev_smoke_test.sh
+docker compose --env-file .env -f infrastructure/docker-compose-dev.yml --profile app up -d --build
 ```
 
-Smoke test creates and approves one **real MongoDB leave record** using short-lived development JWTs. The dev JWT generator is strictly a local test utility, not your finished authentication system. Person 1 must later issue authentic employee login tokens.
+The optional app profile builds leave-service/Dockerfile, runs Java as a non-root
+user, connects to the same MongoDB/Redis services, and exposes only localhost:8081.
+For an Employee Service on the host, use DOCKER_EMPLOYEE_SERVICE_URL (default
+http://host.docker.internal:8082). The Employee Service must listen on an interface
+reachable from the Docker bridge. Bare up -d starts only MongoDB/Redis.
 
-## Integration and security
+Container image build skips tests; run mvn clean verify separately. Compose stop
+preserves data; do not use down -v unless you deliberately intend to delete it.
 
-See `docs/EMPLOYEE_SERVICE_CONTRACT.md`. Nothing here fabricates employee profiles. The `/api/leaves/me/employee-profile` endpoint returns 503 until the real Employee Service is available, unless a successful previous lookup is cached. Core leave workflows can be tested with dev JWTs without that service.
+## Migration and operating limits
 
-The backend currently has a bounded per-year, per-type leave ledger with atomic MongoDB decision updates and `@Version` optimistic concurrency for new submissions. It is a substantial integration foundation, **not a claim that the whole HRMS is production-certified**. Production requires real authentication, user lifecycle integration, permission policies, CI, load testing, and security review.
+Stop all previous application writers before rollout. AccountStore imports old
+leave_ledgers into leave_accounts without deleting the source, preserving IDs,
+days and allowance snapshots. New accounts serialize all types/years via @Version.
+The outbox commits with decisions and retries durable notification delivery.
 
-## React later
+At project scale an employee account supports 5,000 requests and 1,000 queued
+notifications; plan archival before the limit. Manager lists are currently
+unpaginated. Half days, carry-forward/proration, automatic statutory eligibility,
+full payroll/Kafka modules and the frontend are outside this implementation.
 
-React will call these APIs with `Authorization: Bearer <token>`. Native browser `EventSource` doesn't support custom authorization headers; use a streaming `fetch()` client or a secure same-site cookie strategy for SSE. **Do not put JWTs in URL query parameters.**
+Start learning with `../docs/RUN_AND_UNDERSTAND.md`, then CODE_WALKTHROUGH.md,
+ARCHITECTURE.md, ALGORITHMS.md, TESTING.md and INTEGRATION_CONTRACTS.md.
