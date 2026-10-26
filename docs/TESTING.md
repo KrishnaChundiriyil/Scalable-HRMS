@@ -109,7 +109,12 @@ stability, unpaid/pending/rejected totals, decision times, legacy allocation fla
 old integer account compatibility, reminder timing, concurrent reminder scans,
 directory-failure deferral and preventing cancellation of someone else's request.
 
-See ADDITIONAL_FEATURES.md for sample endpoints. Test-only directory responses now
-also implement /api/employees/{managerId}/direct-reports. Production must get that
-endpoint and a restricted reminder lookup credential from Person 1; the test server
-is not shipped as a production employee module.
+See ADDITIONAL_FEATURES.md for sample endpoints. Isolated test-only directory
+responses use /api/employees/{managerId}/direct-reports via a test property
+override. The final Employee module provides the real directory under
+`/api/internal/employees`; the default Leave configuration uses that path.
+
+The final Employee module adds 10 focused JWT and directory authorization tests.
+`scripts/verify_real_integration.py` starts both packaged services with disposable
+databases and real registration/login, covering the complete cross-service flow.
+See [the integration guide](EMPLOYEE_LEAVE_INTEGRATION.md) for setup and scope.

@@ -1,12 +1,16 @@
-name: Leave backend tests
+name: Employee and Leave backend tests
 on:
   push:
     paths:
       - 'leave-service/**'
+      - 'person1-employee-service/**'
+      - 'scripts/verify_real_integration.py'
       - '.github/workflows/leave-service-test.yml'
   pull_request:
     paths:
       - 'leave-service/**'
+      - 'person1-employee-service/**'
+      - 'scripts/verify_real_integration.py'
       - '.github/workflows/leave-service-test.yml'
 jobs:
   test:
@@ -19,7 +23,14 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-          cache-dependency-path: leave-service/pom.xml
+          cache-dependency-path: |
+            leave-service/pom.xml
+            person1-employee-service/pom.xml
       - name: Verify unit and MongoDB/Redis integration tests
         working-directory: leave-service
         run: mvn -B --no-transfer-progress clean verify
+      - name: Verify final Employee module
+        working-directory: person1-employee-service
+        run: mvn -B --no-transfer-progress clean verify
+      - name: Verify both real services together
+        run: python3 scripts/verify_real_integration.py

@@ -2,9 +2,9 @@
 
 ## Person 1: Employee and authentication service
 
-Base URL: `EMPLOYEE_SERVICE_URL`, default `http://localhost:8082`.
+Active module: `person1-employee-service/` (final ZIP). Base URL: `EMPLOYEE_SERVICE_URL`, default `http://localhost:8080`.
 
-`GET /api/employees/{employeeId}` must accept the forwarded caller's Bearer JWT.
+`GET /api/internal/employees/{employeeId}` accepts the forwarded caller's Bearer JWT.
 It must allow an assigned manager or HR/Admin to inspect employees within their
 scope, and allow employees to inspect themselves. Do not accept a self-declared
 manager ID from a JSON request body.
@@ -131,9 +131,9 @@ origins/CORS must be agreed with deployment; no permissive wildcard is enabled.
 
 ## Direct-report endpoint for the additional features
 
-Person 1 must implement:
+The final Person 1 module implements:
 
-`GET /api/employees/{managerId}/direct-reports`
+`GET /api/internal/employees/{managerId}/direct-reports`
 
 It accepts the forwarded manager/HR JWT and returns a complete JSON array of
 EmployeeSummary objects (same fields as the individual lookup). Every returned
@@ -157,7 +157,9 @@ EMPLOYEE_SERVICE_INTERNAL_TOKEN. It must allow the Leave backend to read the
 pending employee's active/managerId information and the assigned manager's active
 status through the existing individual lookup. It must not grant arbitrary
 browser approval rights. Manage expiry/rotation in the identity system and update
-configuration on rotation. This backend does not implement Person 1's token issuer.
+configuration on rotation. The final Employee module accepts an explicitly configured credential only for GET requests under `/api/internal/employees/`; public CRUD and mutations require real login JWTs. Use the same environment value in both services. Leave itself does not issue these credentials or login tokens.
+
+HR/Admin may assign a manager or active status with `PUT /api/internal/employees/{id}/leave-settings` and `{"managerId":"EMP01002","active":true}`. An empty managerId clears the assignment. The server checks the reviewer role and rejects self/cyclic assignments. Employees cannot set these fields through registration or profile updates. The existing `/api/employees` CRUD, profile DTO and login response shape are preserved; `MANAGER` is an additional privileged-create role. Legacy records with no active value remain active.
 
 See [ADDITIONAL_FEATURES.md](ADDITIONAL_FEATURES.md) for preview/session fields,
 paginated endpoints, calendar privacy, audit sequences, notification read state,

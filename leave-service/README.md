@@ -21,7 +21,8 @@ mvn spring-boot:run -Dspring-boot.run.arguments=--server.address=127.0.0.1
 
 Open <http://localhost:8081/actuator/health>. Health does not mean Employee Service
 is available: actual submissions/cancellations/manager operations require Person
-1's service on EMPLOYEE_SERVICE_URL. Until then they fail safely; run clean verify
+1's final service on EMPLOYEE_SERVICE_URL (default localhost:8080). See
+`../docs/EMPLOYEE_LEAVE_INTEGRATION.md` to run both services. Until then they fail safely; run clean verify
 for a complete isolated MongoDB/Redis/API test without that teammate's server.
 
 `.env.example` lists settings; setup_local_env.sh generates a private HMAC key.
@@ -52,7 +53,7 @@ docker compose --env-file .env -f infrastructure/docker-compose-dev.yml --profil
 The optional app profile builds leave-service/Dockerfile, runs Java as a non-root
 user, connects to the same MongoDB/Redis services, and exposes only localhost:8081.
 For an Employee Service on the host, use DOCKER_EMPLOYEE_SERVICE_URL (default
-http://host.docker.internal:8082). The Employee Service must listen on an interface
+http://host.docker.internal:8080). The Employee Service must listen on an interface
 reachable from the Docker bridge. Bare up -d starts only MongoDB/Redis.
 
 Container image build skips tests; run mvn clean verify separately. Compose stop

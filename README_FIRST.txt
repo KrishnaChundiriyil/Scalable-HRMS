@@ -1,7 +1,9 @@
-SCALABLE HRMS - LEAVE BACKEND
+SCALABLE HRMS - EMPLOYEE AND LEAVE BACKENDS
 
-Start with leave-service/README.md and docs/RUN_AND_UNDERSTAND.md.
+Start with docs/EMPLOYEE_LEAVE_INTEGRATION.md for both real services.
+The final Employee app is person1-employee-service/ (from the final ZIP).
+Do not launch the older scalable-hrms-person1/ snapshot for this integration.
 Run mvn clean verify inside leave-service for the isolated test suite.
 Use the real Employee Service for live submissions, approvals and cancellations.
-No frontend or production mock Employee Service is included.
+The final module is backend only; there is no new frontend or production mock.
 Never commit .env or tokens.

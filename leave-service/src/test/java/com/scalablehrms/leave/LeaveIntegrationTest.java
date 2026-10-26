@@ -77,6 +77,7 @@ class LeaveIntegrationTest {
         props.add("spring.data.redis.port", () -> redisContainer.getMappedPort(6379));
         props.add("hrms.security.jwt-secret-base64", () -> Base64.getEncoder().encodeToString(SECRET));
         props.add("hrms.employee-service.internal-token", () -> "isolated-test-service-credential");
+        props.add("hrms.employee-service.directory-path", () -> "/api/employees");
         props.add("hrms.employee-service.url", () -> "http://127.0.0.1:" + upstream.getAddress().getPort());
     }
     @Autowired TestRestTemplate http;

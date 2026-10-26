@@ -51,7 +51,7 @@ class EmployeeDirectoryClientTest {
         var registry = CircuitBreakerRegistry.of(config);
         breaker = registry.circuitBreaker("employeeDirectory");
         client = new EmployeeDirectoryClient(RestClient.builder(), redis, new ObjectMapper(), registry,
-            "http://127.0.0.1:" + upstream.getAddress().getPort(), 100, 100, 2);
+            "http://127.0.0.1:" + upstream.getAddress().getPort(), 100, 100, 2, "/api/employees");
     }
 
     @AfterEach void stop() { upstream.stop(0); }

@@ -30,19 +30,22 @@ public class EmployeeDirectoryClient {
     private final ObjectMapper mapper;
     private final CircuitBreaker breaker;
     private final Retry retry;
+    private final String directoryPath;
 
     public EmployeeDirectoryClient(RestClient.Builder builder, StringRedisTemplate redis,
             ObjectMapper mapper, CircuitBreakerRegistry registry,
             @Value("${hrms.employee-service.url}") String baseUrl,
             @Value("${hrms.employee-service.connect-timeout-ms:1000}") int connectTimeout,
             @Value("${hrms.employee-service.read-timeout-ms:2000}") int readTimeout,
-            @Value("${hrms.employee-service.max-attempts:2}") int attempts) {
+            @Value("${hrms.employee-service.max-attempts:2}") int attempts,
+            @Value("${hrms.employee-service.directory-path:/api/internal/employees}") String directoryPath) {
         if (connectTimeout < 1 || readTimeout < 1 || attempts < 1 || attempts > 3)
             throw new IllegalArgumentException("Invalid Employee Service timeout or attempt count");
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(connectTimeout);
         factory.setReadTimeout(readTimeout);
         this.http = builder.requestFactory(factory).baseUrl(baseUrl).build();
+        this.directoryPath=directoryPath.replaceAll("/+$", "");
         this.redis = redis;
         this.mapper = mapper;
         this.breaker = registry.circuitBreaker("employeeDirectory");
@@ -64,7 +67,7 @@ public class EmployeeDirectoryClient {
 
     private EmployeeSummary fetch(String employeeId, String authorizationHeader) {
         return breaker.executeSupplier(() -> retry.executeSupplier(() -> {
-            EmployeeSummary info = http.get().uri("/api/employees/{id}", employeeId)
+            EmployeeSummary info = http.get().uri(directoryPath+"/{id}", employeeId)
                 .header(HttpHeaders.AUTHORIZATION, authorizationHeader)
                 .retrieve().body(EmployeeSummary.class);
             if (info == null || !employeeId.equals(info.employeeId()))
@@ -80,7 +83,7 @@ public class EmployeeDirectoryClient {
     public java.util.List<EmployeeSummary> directReports(String managerId,String bearer) {
         try {
             var reports = breaker.executeSupplier(() -> retry.executeSupplier(() -> http.get()
-                .uri("/api/employees/{id}/direct-reports",managerId)
+                .uri(directoryPath+"/{id}/direct-reports",managerId)
                 .header(HttpHeaders.AUTHORIZATION,bearer).retrieve()
                 .body(new org.springframework.core.ParameterizedTypeReference<java.util.List<EmployeeSummary>>() {})));
             if (reports == null || reports.size()>10000 || reports.stream().anyMatch(e ->
