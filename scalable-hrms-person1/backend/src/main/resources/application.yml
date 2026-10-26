@@ -1,0 +1,21 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: employee-service
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/hrms}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  cache:
+    type: redis
+    redis:
+      time-to-live: 300000
+      cache-null-values: false
+jwt:
+  secret: ${JWT_SECRET:local-demo-secret-key-change-this-before-deployment-123456789}
+  expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+app:
+  cors-origin: ${CORS_ORIGIN:http://localhost:5173}
