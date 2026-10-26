@@ -16,6 +16,7 @@ class JwtServiceTest {
         ReflectionTestUtils.setField(service,"base64Secret",Base64.getEncoder().encodeToString(key));
         ReflectionTestUtils.setField(service,"issuer","hrms-employee-service");
         ReflectionTestUtils.setField(service,"audience","hrms-leave-service");
+        ReflectionTestUtils.setField(service,"recruitmentAudience","hrms-recruitment-service");
         ReflectionTestUtils.setField(service,"expirationMs",60000L);
         return service;
     }
@@ -30,6 +31,7 @@ class JwtServiceTest {
         assertEquals(List.of("MANAGER"),claims.get("roles"));
         assertEquals("employee@example.test",claims.get("email"));
         assertNotNull(claims.getExpiration());
+        assertEquals(Set.of("hrms-leave-service","hrms-recruitment-service"),claims.getAudience());
     }
     @Test void rejectsWrongIssuerAndAudienceEvenWithCorrectSignature() {
         var service=service();

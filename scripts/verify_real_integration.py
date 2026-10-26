@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Verify the final Employee and Leave jars together against disposable databases.
+"""Verify Employee and Leave, optionally Recruitment, against disposable databases.
 
-Requires Java 21, Docker, and `mvn clean verify` in both active modules.
+Requires Java 21, Docker, and `mvn clean verify` in each selected module.
 No dev JWTs, directory stubs, existing databases, or fixed account passwords.
 """
 import base64
+import argparse
 import datetime as dt
 import json
 import os
@@ -15,6 +16,7 @@ import subprocess
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -22,6 +24,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--with-recruitment',action='store_true',help='Also verify Recruitment using a real Kafka broker')
+    options=parser.parse_args()
     logs = Path(tempfile.mkdtemp(prefix="hrms-real-integration-"))
     processes, containers, files = [], [], []
     checks = 0
@@ -47,6 +52,28 @@ def main():
             listener.bind(("127.0.0.1", 0))
             return listener.getsockname()[1]
 
+    def kafka_container():
+        port=free_port()
+        name='hrms-integration-'+uuid.uuid4().hex[:12]
+        settings={
+            'KAFKA_NODE_ID':'1', 'KAFKA_PROCESS_ROLES':'broker,controller',
+            'KAFKA_LISTENERS':'PLAINTEXT://:9092,CONTROLLER://:9093',
+            'KAFKA_ADVERTISED_LISTENERS':f'PLAINTEXT://127.0.0.1:{port}',
+            'KAFKA_CONTROLLER_LISTENER_NAMES':'CONTROLLER',
+            'KAFKA_LISTENER_SECURITY_PROTOCOL_MAP':'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT',
+            'KAFKA_CONTROLLER_QUORUM_VOTERS':'1@localhost:9093',
+            'KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR':'1',
+            'KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR':'1',
+            'KAFKA_TRANSACTION_STATE_LOG_MIN_ISR':'1',
+            'KAFKA_HEAP_OPTS':'-Xms128m -Xmx256m',
+        }
+        args=['run','--rm','-d','--name',name,'-p',f'127.0.0.1:{port}:9092']
+        for key,value in settings.items():
+            args+=['-e',f'{key}={value}']
+        docker(*args,'apache/kafka:3.8.0')
+        containers.append(name)
+        return port
+
     def start(module, jar, env):
         output = (logs / f"{module}.log").open("w")
         files.append(output)
@@ -55,12 +82,12 @@ def main():
         processes.append(process)
         return process
 
-    def request(base, path, token=None, data=None, method="GET", expected=200):
-        headers = {"Content-Type": "application/json"}
+    def request(base, path, token=None, data=None, method="GET", expected=200,content_type="application/json"):
+        headers = {"Content-Type": content_type}
         if token:
             headers["Authorization"] = "Bearer " + token
         req = urllib.request.Request(base + path, method=method, headers=headers,
-                                     data=None if data is None else json.dumps(data).encode())
+                                     data=data if isinstance(data,bytes) else None if data is None else json.dumps(data).encode())
         try:
             with urllib.request.urlopen(req, timeout=12) as response:
                 status, body = response.status, response.read()
@@ -85,16 +112,18 @@ def main():
     try:
         mongo_port = container("mongo:7", 27017)
         redis_port = container("redis:7-alpine", 6379)
+        kafka_port=kafka_container() if options.with_recruitment else None
         employee_port, leave_port = free_port(), free_port()
         employee_base, leave_base = f"http://127.0.0.1:{employee_port}", f"http://127.0.0.1:{leave_port}"
         password, internal = secrets.token_urlsafe(24), secrets.token_urlsafe(40)
         # Prevent a developer's shell configuration from selecting real databases,
         # external config files or JVM-injected properties.
         env = {key: value for key, value in os.environ.items()
-               if not key.startswith(("SPRING_", "HRMS_", "EMPLOYEE_", "LEAVE_", "MONGODB_", "REDIS_"))
-               and key not in {"JWT_SECRET", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS"}}
+               if not key.startswith(("SPRING_", "HRMS_", "EMPLOYEE_", "LEAVE_", "MONGODB_", "REDIS_", "RECRUITMENT_", "KAFKA_", "APP_"))
+               and key not in {"JWT_SECRET", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "SERVER_PORT"}}
         env.update(HRMS_JWT_SECRET_BASE64=base64.b64encode(secrets.token_bytes(48)).decode(),
                    HRMS_JWT_ISSUER="hrms-employee-service", HRMS_JWT_AUDIENCE="hrms-leave-service",
+                   HRMS_RECRUITMENT_JWT_AUDIENCE="hrms-recruitment-service",
                    EMPLOYEE_SERVICE_INTERNAL_TOKEN=internal, REDIS_HOST="127.0.0.1", REDIS_PORT=str(redis_port),
                    EMPLOYEE_SERVICE_PORT=str(employee_port), LEAVE_SERVICE_PORT=str(leave_port),
                    EMPLOYEE_SERVICE_URL=employee_base, EMPLOYEE_DIRECTORY_PATH="/api/internal/employees",
@@ -107,6 +136,16 @@ def main():
         ready(employee_base, "/api/auth/health", employee_process)
         leave_process = start("leave-service", "leave-service-0.2.0-SNAPSHOT.jar", env)
         ready(leave_base, "/actuator/health", leave_process)
+        recruitment_base=None
+        if options.with_recruitment:
+            recruitment_base=f'http://127.0.0.1:{free_port()}'
+            recruitment_env=dict(env,RECRUITMENT_SERVICE_PORT=recruitment_base.rsplit(':',1)[1],
+                RECRUITMENT_BASE_URL=recruitment_base, RECRUITMENT_STORAGE_ROOT=str(logs/'resumes'),
+                RECRUITMENT_MONGODB_URI=f'mongodb://127.0.0.1:{mongo_port}/hrms_recruitment_integration',
+                KAFKA_BOOTSTRAP_SERVERS=f'127.0.0.1:{kafka_port}',RECRUITMENT_KAFKA_TOPIC='hrms.integration.events',
+                RECRUITMENT_KAFKA_GROUP='hrms-integration-notifications')
+            recruitment_process=start('recruitment-service','recruitment-service-1.0.0.jar',recruitment_env)
+            ready(recruitment_base,'/actuator/health',recruitment_process)
 
         def login(email):
             return request(employee_base, "/api/auth/login", data={"email": email, "password": password}, method="POST")["token"]
@@ -180,11 +219,82 @@ def main():
         request(leave_base, "/api/leaves", employee_token, body, "POST", 403)
         check(True, "deactivated employee cannot submit even after a profile was cached")
         request(employee_base, settings, admin, {"active": True}, "PUT")
+
+        if recruitment_base:
+            hr=register('Recruitment HR','hr@example.test','HR')
+            hr_token=login(hr['email'])
+            job_body={'title':'Java Engineer','company':'Integration Company','location':'India','description':'Integration job'}
+            request(recruitment_base,'/api/jobs',data=job_body,method='POST',expected=401)
+            request(recruitment_base,'/api/jobs',employee_token,job_body,'POST',403)
+            request(recruitment_base,'/api/jobs',manager_token,job_body,'POST',403)
+            request(recruitment_base,'/api/jobs',internal,job_body,'POST',401)
+            check(True,'Recruitment staff mutations reject anonymous, employee, manager and directory credentials')
+            job=request(recruitment_base,'/api/jobs',hr_token,job_body,'POST')
+            check(job['title']==job_body['title'],'real HR login publishes a Recruitment job')
+            public_jobs=request(recruitment_base,'/api/jobs')
+            check(any(item['id']==job['id'] for item in public_jobs),'job browsing remains public')
+            redirect=request(recruitment_base,'/s/'+job['shortCode'])
+            check(redirect['id']==job['id'] and request(recruitment_base,'/api/jobs/'+job['id'])['clicks']==1,'Redis short links redirect and count clicks')
+            shortened=request(recruitment_base,'/api/shorten',hr_token,{'url':recruitment_base+'/api/jobs/'+job['id']},'POST')
+            check(request(recruitment_base,'/s/'+shortened['code'])['id']==job['id'],'HR can create additional short links')
+            candidate_body={'name':'Public Candidate','email':'candidate@example.test','phone':'1234567890'}
+            candidate=request(recruitment_base,'/api/candidates',data=candidate_body,method='POST')
+            check(request(recruitment_base,'/api/candidates',data=candidate_body,method='POST')['id']==candidate['id'],'candidate registration stays public and idempotent by email')
+            request(recruitment_base,'/api/candidates',expected=401)
+            request(recruitment_base,'/api/candidates',employee_token,expected=403)
+            check(request(recruitment_base,'/api/candidates',hr_token)[0]['id']==candidate['id'],'candidate personal data is restricted to HR/Admin')
+
+            boundary='hrms-'+uuid.uuid4().hex
+            parts=[]
+            for name,value in dict(jobId=job['id'],name=candidate_body['name'],email=candidate_body['email'],phone=candidate_body['phone']).items():
+                parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
+            resume=b'Integration resume: Java, Spring Boot, MongoDB.'
+            parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="resume"; filename="resume.txt"\r\nContent-Type: text/plain\r\n\r\n'.encode()+resume+b'\r\n')
+            parts.append(f'--{boundary}--\r\n'.encode())
+            application=request(recruitment_base,'/api/applications',data=b''.join(parts),method='POST',content_type='multipart/form-data; boundary='+boundary)
+            original_path=Path(application['storedPath'])
+            check(application['status']=='SUBMITTED' and original_path.is_relative_to(logs/'resumes') and original_path.read_bytes()==resume,'public application stores the actual resume using the consistent hash ring')
+            request(recruitment_base,'/api/applications',expected=401)
+            request(recruitment_base,'/api/applications',employee_token,expected=403)
+            check(request(recruitment_base,'/api/applications?jobId='+job['id'],hr_token)[0]['id']==application['id'],'application lists are private to HR/Admin')
+            changed=request(recruitment_base,'/api/applications/'+application['id']+'/status',hr_token,{'status':'SHORTLISTED'},'PUT')
+            check(changed['status']=='SHORTLISTED','HR updates application status through shared identity')
+            request(recruitment_base,'/api/storage/nodes',hr_token,expected=403)
+            nodes=request(recruitment_base,'/api/storage/nodes',admin)
+            check(sum(nodes['resumesPerNode'].values())==1,'only Admin can administer resume storage')
+            removal=request(recruitment_base,'/api/storage/nodes/'+application['storageNode'],admin,method='DELETE')
+            moved=request(recruitment_base,'/api/applications',hr_token)[0]
+            check(removal['moved']==1 and moved['storageNode']!=application['storageNode'] and Path(moved['storedPath']).read_bytes()==resume and not original_path.exists(),'removing a storage node rebalances the resume without changing its contents')
+            request(recruitment_base,'/api/storage/nodes/node-D',admin,method='POST')
+            check('node-D' in request(recruitment_base,'/api/storage/nodes',admin)['nodes'],'storage nodes can be added through the preserved API')
+            seed=urllib.parse.quote(recruitment_base+'/demo-jobs/index.html',safe='')
+            crawl=request(recruitment_base,'/api/crawler/crawl?seed='+seed+'&maxPages=10&reset=true',hr_token,method='POST')
+            check(crawl['pagesVisited']==3 and crawl['newJobsFound']==4,'authenticated crawler traverses the real demo board with BFS')
+            repeated=request(recruitment_base,'/api/crawler/crawl?seed='+seed+'&maxPages=10',hr_token,method='POST')
+            check(repeated['pagesVisited']==0 and len(request(recruitment_base,'/api/crawler/jobs',hr_token))==4,'Redis visited set prevents repeat crawling and duplicate jobs')
+            request(recruitment_base,'/api/notifications',expected=401)
+            for attempt in range(80):
+                events=request(recruitment_base,'/api/notifications',hr_token)
+                if {'JOB_PUBLISHED','APPLICATION_SUBMITTED','APPLICATION_STATUS'} <= {item['type'] for item in events}:
+                    break
+                time.sleep(0.25)
+            check({'JOB_PUBLISHED','APPLICATION_SUBMITTED','APPLICATION_STATUS'} <= {item['type'] for item in events},'real Kafka publishes and consumes job, application and status events into Mongo notifications')
+            hr_settings='/api/internal/employees/'+hr['employeeId']+'/leave-settings'
+            request(employee_base,hr_settings,admin,{'active':False},'PUT')
+            request(recruitment_base,'/api/jobs',hr_token,job_body,'POST',403)
+            request(recruitment_base,'/api/notifications',hr_token,expected=403)
+            check(len(request(recruitment_base,'/api/jobs'))==1,'deactivated HR loses staff access immediately while public job browsing remains available')
+            request(employee_base,hr_settings,admin,{'active':True},'PUT')
+
         employee_process.terminate()
         employee_process.wait(timeout=20)
         time.sleep(1)
         request(leave_base, "/api/leaves", employee_token, body, "POST", 503)
         check(len(request(leave_base, "/api/leaves/me", employee_token)) == 1, "Employee outage blocks writes while durable leave history stays readable")
+        if recruitment_base:
+            request(recruitment_base,'/api/jobs',hr_token,job_body,'POST',503)
+            request(recruitment_base,'/api/notifications',hr_token,expected=503)
+            check(len(request(recruitment_base,'/api/jobs'))==1,'Recruitment blocks staff access during Employee outage and keeps public job browsing online')
         print(f"\n{checks} integration checks passed. Logs: {logs}", flush=True)
     finally:
         for process in reversed(processes):

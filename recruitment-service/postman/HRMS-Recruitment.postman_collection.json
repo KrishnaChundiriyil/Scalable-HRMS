@@ -1,0 +1,1377 @@
+{
+  "info": {
+    "name": "HRMS Recruitment Service (backend)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Start Mongo/Redis/Kafka (docker compose up -d), run the app, then run folders 1 to 6 in order (Collection Runner). In request 3.1 pick postman/sample-resume.txt for the 'resume' field. Set staffEmail/staffPassword to your configured Employee-service Admin login, then run folder 0 first. Admin is required for storage administration; HR can run recruitment business requests."
+  },
+  "item": [
+    {
+      "name": "0. Log in through Employee service (HR/Admin)",
+      "item": [
+        {
+          "name": "Shared staff login",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{employeeBaseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{staffEmail}}\",\n  \"password\": \"{{staffPassword}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) pm.collectionVariables.set(\"staffToken\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Jobs + URL Shortener (Redis INCR + base62)",
+      "description": "",
+      "item": [
+        {
+          "name": "1.1 Publish job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Java Backend Developer\",\n  \"company\": \"Acme Tech\",\n  \"location\": \"Chennai\",\n  \"description\": \"Spring Boot, Mongo, Redis\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"has id + shortCode + shortUrl\", () => {",
+                  "  pm.expect(j.id).to.be.a('string');",
+                  "  pm.expect(j.shortCode).to.be.a('string').and.have.length.of.at.least(3);",
+                  "  pm.expect(j.shortUrl).to.include('/s/' + j.shortCode);",
+                  "});",
+                  "pm.test(\"clicks start at 0\", () => pm.expect(j.clicks).to.eql(0));",
+                  "pm.collectionVariables.set('jobId', j.id);",
+                  "pm.collectionVariables.set('shortCode', j.shortCode);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.2 List jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"contains the job I just published\", () =>",
+                  "  pm.expect(pm.response.json().map(x => x.id)).to.include(pm.collectionVariables.get('jobId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.3 Get job by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs/{{jobId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs",
+                "{{jobId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"same id + title\", () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id).to.eql(pm.collectionVariables.get('jobId'));",
+                  "  pm.expect(j.title).to.eql('Java Backend Developer');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.4 Get unknown job -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs/000000000000000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs",
+                "000000000000000000000000"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.5 Short link redirect (302, redirects OFF)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/s/{{shortCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "s",
+                "{{shortCode}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"302 Found\", () => pm.response.to.have.status(302));",
+                  "pm.test(\"Location points to the job\", () =>",
+                  "  pm.expect(pm.response.headers.get('Location')).to.include('/api/jobs/' + pm.collectionVariables.get('jobId')));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "1.6 Hit short link again (click counter)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/s/{{shortCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "s",
+                "{{shortCode}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"302 Found\", () => pm.response.to.have.status(302));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "1.7 Clicks increased to 2",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs/{{jobId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs",
+                "{{jobId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"clicks == 2 (Redis INCR per redirect)\", () => pm.expect(pm.response.json().clicks).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.8 Unknown short code -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/s/zzzzzz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "s",
+                "zzzzzz"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "1.9 Shorten any URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "shorten"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://meet.example.com/interview/123\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"code + shortUrl + longUrl returned\", () => {",
+                  "  pm.expect(j.code).to.be.a('string');",
+                  "  pm.expect(j.shortUrl).to.include('/s/' + j.code);",
+                  "  pm.expect(j.longUrl).to.eql('https://meet.example.com/interview/123');",
+                  "});",
+                  "pm.collectionVariables.set('code1', j.code);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.10 Shorten again -> different code (unique counter)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "shorten"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://meet.example.com/interview/456\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"code differs from previous\", () => pm.expect(pm.response.json().code).to.not.eql(pm.collectionVariables.get('code1')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.11 Shorten invalid URL -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "shorten"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"ftp://bad\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error message\", () => pm.expect(pm.response.json().error).to.include('http'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Candidates",
+      "description": "",
+      "item": [
+        {
+          "name": "2.1 Register candidate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice\",\n  \"email\": \"alice@example.com\",\n  \"phone\": \"9999999999\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const c = pm.response.json();",
+                  "pm.test(\"has id + email\", () => { pm.expect(c.id).to.be.a('string'); pm.expect(c.email).to.eql('alice@example.com'); });",
+                  "pm.collectionVariables.set('candidateId', c.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.2 Same email again -> same candidate (no duplicate)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Again\",\n  \"email\": \"alice@example.com\",\n  \"phone\": \"1\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"same id returned\", () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('candidateId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.3 List candidates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 + exactly one alice@example.com\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().filter(c => c.email === 'alice@example.com')).to.have.length(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Applications + resume storage",
+      "description": "Run 3.1 about 8-10 times (Collection Runner or Send repeatedly) so every storage node holds some resumes before folder 4.",
+      "item": [
+        {
+          "name": "3.1 Apply (select postman/sample-resume.txt in 'resume')",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/applications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "applications"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "jobId",
+                  "value": "{{jobId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "name",
+                  "value": "Alice",
+                  "type": "text"
+                },
+                {
+                  "key": "email",
+                  "value": "alice@example.com",
+                  "type": "text"
+                },
+                {
+                  "key": "phone",
+                  "value": "9999999999",
+                  "type": "text"
+                },
+                {
+                  "key": "resume",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test(\"status SUBMITTED, resume + node recorded\", () => {",
+                  "  pm.expect(a.status).to.eql('SUBMITTED');",
+                  "  pm.expect(a.resumeFileName).to.be.a('string');",
+                  "  pm.expect(a.storageNode).to.match(/^node-/);",
+                  "  pm.expect(a.jobId).to.eql(pm.collectionVariables.get('jobId'));",
+                  "});",
+                  "pm.collectionVariables.set('applicationId', a.id);",
+                  "console.log(\"Stored on\", a.storageNode);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.2 Apply with unknown jobId -> 400",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/applications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "applications"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "jobId",
+                  "value": "doesnotexist",
+                  "type": "text"
+                },
+                {
+                  "key": "name",
+                  "value": "Alice",
+                  "type": "text"
+                },
+                {
+                  "key": "email",
+                  "value": "alice@example.com",
+                  "type": "text"
+                },
+                {
+                  "key": "phone",
+                  "value": "9999999999",
+                  "type": "text"
+                },
+                {
+                  "key": "resume",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Unknown jobId\", () => pm.expect(pm.response.json().error).to.eql('Unknown jobId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.3 Apply without resume file -> 400",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/applications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "applications"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "jobId",
+                  "value": "{{jobId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "name",
+                  "value": "Alice",
+                  "type": "text"
+                },
+                {
+                  "key": "email",
+                  "value": "alice@example.com",
+                  "type": "text"
+                },
+                {
+                  "key": "phone",
+                  "value": "9999999999",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 (resume part missing)\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.4 List all applications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/applications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "applications"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK + contains my application\", () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().map(a => a.id)).to.include(pm.collectionVariables.get('applicationId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.5 Filter applications by jobId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/applications?jobId={{jobId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "applications"
+              ],
+              "query": [
+                {
+                  "key": "jobId",
+                  "value": "{{jobId}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"every row belongs to this job\", () => {",
+                  "  const l = pm.response.json();",
+                  "  pm.expect(l.length).to.be.at.least(1);",
+                  "  l.forEach(a => pm.expect(a.jobId).to.eql(pm.collectionVariables.get('jobId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.6 HR updates status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/applications/{{applicationId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "applications",
+                "{{applicationId}}",
+                "status"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SHORTLISTED\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"status is SHORTLISTED\", () => pm.expect(pm.response.json().status).to.eql('SHORTLISTED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.7 Status update on unknown id -> 404",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/applications/000000000000000000000000/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "applications",
+                "000000000000000000000000",
+                "status"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"REJECTED\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Consistent hashing (run AFTER ~10 applications)",
+      "description": "Also check the resume-storage/ folder on disk: files must physically move between node-X folders.",
+      "item": [
+        {
+          "name": "4.1 List nodes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/storage/nodes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "storage",
+                "nodes"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"starts with node-A/B/C, 100 virtual nodes each\", () => {",
+                  "  pm.expect(r.nodes).to.have.members(['node-A','node-B','node-C']);",
+                  "  pm.expect(r.virtualNodesPerNode).to.eql(100);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.2 Simulate 10,000 keys (load balance)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/storage/simulate?keys=10000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "storage",
+                "simulate"
+              ],
+              "query": [
+                {
+                  "key": "keys",
+                  "value": "10000"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json();",
+                  "const vals = Object.values(d);",
+                  "pm.test(\"all 10000 keys placed\", () => pm.expect(vals.reduce((a,b)=>a+b,0)).to.eql(10000));",
+                  "pm.test(\"each node gets a fair share (20%-47%)\", () => vals.forEach(v => pm.expect(v).to.be.within(2000, 4700)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.3 Add node-D + rebalance",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/storage/nodes/node-D",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "storage",
+                "nodes",
+                "node-D"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"node-D now in distribution\", () => pm.expect(r.resumesPerNode).to.have.property('node-D'));",
+                  "pm.test(\"ONLY moves go TO node-D (consistent hashing property)\", () => r.moves.forEach(m => pm.expect(m.to).to.eql('node-D')));",
+                  "pm.test(\"not everything moved (hash%N would move ~75%)\", () => pm.expect(r.movedPercent).to.be.below(60));",
+                  "console.log(\"moved\", r.moved, \"of\", r.totalResumes, \"=\", r.movedPercent + \"%\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.4 Remove node-B + rebalance",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/storage/nodes/node-B",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "storage",
+                "nodes",
+                "node-B"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ONLY node-B's resumes moved\", () => r.moves.forEach(m => pm.expect(m.from).to.eql('node-B')));",
+                  "pm.test(\"node-B gone, holds 0 resumes\", () => pm.expect(r.resumesPerNode).to.not.have.property('node-B'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.5 Nodes after changes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/storage/nodes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "storage",
+                "nodes"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"node-A, node-C, node-D remain\", () => pm.expect(pm.response.json().nodes).to.have.members(['node-A','node-C','node-D']));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.6 Applications still point to live nodes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/applications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "applications"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"no application references node-B\", () => pm.response.json().forEach(a => pm.expect(a.storageNode).to.not.eql('node-B')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Kafka notifications",
+      "description": "If a type is missing, wait 2 seconds and resend: the consumer is asynchronous.",
+      "item": [
+        {
+          "name": "5.1 Notifications consumed from Kafka",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "notifications"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const types = pm.response.json().map(n => n.type);",
+                  "pm.test(\"JOB_PUBLISHED consumed\", () => pm.expect(types).to.include('JOB_PUBLISHED'));",
+                  "pm.test(\"APPLICATION_SUBMITTED consumed\", () => pm.expect(types).to.include('APPLICATION_SUBMITTED'));",
+                  "pm.test(\"APPLICATION_STATUS consumed\", () => pm.expect(types).to.include('APPLICATION_STATUS'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Web crawler (BFS + Redis visited set)",
+      "description": "",
+      "item": [
+        {
+          "name": "6.1 Crawl demo board (reset visited set)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crawler/crawl?seed={{baseUrl}}/demo-jobs/index.html&reset=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crawler",
+                "crawl"
+              ],
+              "query": [
+                {
+                  "key": "seed",
+                  "value": "{{baseUrl}}/demo-jobs/index.html"
+                },
+                {
+                  "key": "reset",
+                  "value": "true"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"visited index, page2, page3\", () => pm.expect(r.pagesVisited).to.eql(3));",
+                  "pm.test(\"page3 was queued twice -> 1 SKIP (visited set works)\", () => pm.expect(r.skippedAlreadyVisited).to.eql(1));",
+                  "pm.test(\"4 jobs on first run (0 if already crawled before)\", () => pm.expect(r.newJobsFound).to.be.oneOf([0, 4]));",
+                  "pm.test(\"log has VISIT and SKIP lines\", () => {",
+                  "  pm.expect(r.log.some(l => l.startsWith('VISIT'))).to.be.true;",
+                  "  pm.expect(r.log.some(l => l.startsWith('SKIP'))).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.2 Crawl again WITHOUT reset",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crawler/crawl?seed={{baseUrl}}/demo-jobs/index.html",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crawler",
+                "crawl"
+              ],
+              "query": [
+                {
+                  "key": "seed",
+                  "value": "{{baseUrl}}/demo-jobs/index.html"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.test(\"nothing re-visited\", () => { pm.expect(r.pagesVisited).to.eql(0); pm.expect(r.newJobsFound).to.eql(0); });",
+                  "pm.test(\"seed skipped\", () => pm.expect(r.skippedAlreadyVisited).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.3 Crawled jobs saved in Mongo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crawler/jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crawler",
+                "jobs"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const titles = pm.response.json().map(j => j.title);",
+                  "pm.test(\"all 4 demo jobs present, no duplicates\", () => {",
+                  "  pm.expect(titles).to.include.members(['Java Backend Developer','Data Analyst','DevOps Engineer','UI/UX Designer']);",
+                  "  pm.expect(new Set(titles).size).to.eql(titles.length);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.4 maxPages=1 limit",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crawler/crawl?seed={{baseUrl}}/demo-jobs/index.html&maxPages=1&reset=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crawler",
+                "crawl"
+              ],
+              "query": [
+                {
+                  "key": "seed",
+                  "value": "{{baseUrl}}/demo-jobs/index.html"
+                },
+                {
+                  "key": "maxPages",
+                  "value": "1"
+                },
+                {
+                  "key": "reset",
+                  "value": "true"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.test(\"stops after 1 page, rest left in queue\", () => { pm.expect(r.pagesVisited).to.eql(1); pm.expect(r.queueRemaining).to.eql(2); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.5 Non-http seed -> 400",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/crawler/crawl?seed=ftp://bad",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "crawler",
+                "crawl"
+              ],
+              "query": [
+                {
+                  "key": "seed",
+                  "value": "ftp://bad"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error message\", () => pm.expect(pm.response.json().error).to.include('http'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8084"
+    },
+    {
+      "key": "jobId",
+      "value": ""
+    },
+    {
+      "key": "shortCode",
+      "value": ""
+    },
+    {
+      "key": "applicationId",
+      "value": ""
+    },
+    {
+      "key": "candidateId",
+      "value": ""
+    },
+    {
+      "key": "code1",
+      "value": ""
+    },
+    {
+      "key": "employeeBaseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "staffEmail",
+      "value": ""
+    },
+    {
+      "key": "staffPassword",
+      "value": ""
+    },
+    {
+      "key": "staffToken",
+      "value": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{staffToken}}",
+        "type": "string"
+      }
+    ]
+  }
+}

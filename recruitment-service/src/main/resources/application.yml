@@ -1,0 +1,59 @@
+server:
+  port: ${RECRUITMENT_SERVICE_PORT:8084}
+spring:
+  application:
+    name: recruitment-service
+  data:
+    mongodb:
+      uri: ${RECRUITMENT_MONGODB_URI:mongodb://localhost:27017/hrms_recruitment}
+      auto-index-creation: true
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      connect-timeout: 1s
+      timeout: 1s
+      repositories:
+        enabled: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${RECRUITMENT_KAFKA_GROUP:hrms-notification-group}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        max.block.ms: 3000   # if Kafka is down, fail fast (3s) instead of hanging the API call for 60s
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+app:
+  base-url: ${RECRUITMENT_BASE_URL:http://localhost:8084}
+  storage:
+    root: ${RECRUITMENT_STORAGE_ROOT:./resume-storage}
+    initial-nodes: node-A,node-B,node-C
+    virtual-nodes: 100
+  kafka:
+    topic: ${RECRUITMENT_KAFKA_TOPIC:hrms.application.events}
+  crawler:
+    max-pages: 30
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+hrms:
+  security:
+    jwt-secret-base64: ${HRMS_JWT_SECRET_BASE64:}
+    jwk-set-uri: ${HRMS_JWT_JWK_SET_URI:}
+    issuer: ${HRMS_JWT_ISSUER:hrms-employee-service}
+    audience: ${HRMS_RECRUITMENT_JWT_AUDIENCE:hrms-recruitment-service}
+  employee-service:
+    url: ${EMPLOYEE_SERVICE_URL:http://localhost:8080}
+    directory-path: ${EMPLOYEE_DIRECTORY_PATH:/api/internal/employees}
+    connect-timeout-ms: ${EMPLOYEE_CONNECT_TIMEOUT_MS:1000}
+    read-timeout-ms: ${EMPLOYEE_READ_TIMEOUT_MS:2000}
