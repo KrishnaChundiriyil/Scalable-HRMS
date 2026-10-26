@@ -10,8 +10,8 @@ cd /home/krish/Downloads/Scalable-HRMS/leave-service
 mvn clean verify
 ```
 
-The suite currently contains **31 tests**: 3 filter/config tests, 4 policy/domain
-tests, 6 Employee Service client tests, and 18 MongoDB/Redis/API integration tests.
+The suite currently contains **47 tests**: 3 filter/config tests, 4 policy/domain
+tests, 6 Employee Service client tests, and 34 MongoDB/Redis/API integration tests.
 The full command was executed successfully with zero failures/errors/skips on
 26 October 2026 after the backend changes. Maven reports live under
 `leave-service/target/surefire-reports` (ignored by Git).
@@ -95,3 +95,21 @@ old ledgers without deleting them. Confirm their IDs/days/allowances before any
 manual archival. Original data is not reset by dev Compose startup. Employee
 Service's real tokens/profile/manager endpoint must satisfy INTEGRATION_CONTRACTS.
 Payroll/Kafka integration and the React application are separate work.
+
+
+## Additional feature verification
+
+The 47-test clean verify run passed with zero failures/errors/skips on 26 October
+2026. The additional tests cover complementary half-day sessions and exact
+fractional refunds, concurrent final-half-day approvals, invalid sessions,
+side-effect-free preview, ordered/scoped audit history, MongoDB page/filter counts,
+calendar privacy and current team scope, recipient-only read state, preserving
+readAt during notification retry, exact report period clipping, holiday snapshot
+stability, unpaid/pending/rejected totals, decision times, legacy allocation flags,
+old integer account compatibility, reminder timing, concurrent reminder scans,
+directory-failure deferral and preventing cancellation of someone else's request.
+
+See ADDITIONAL_FEATURES.md for sample endpoints. Test-only directory responses now
+also implement /api/employees/{managerId}/direct-reports. Production must get that
+endpoint and a restricted reminder lookup credential from Person 1; the test server
+is not shipped as a production employee module.

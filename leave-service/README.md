@@ -67,8 +67,12 @@ The outbox commits with decisions and retries durable notification delivery.
 
 At project scale an employee account supports 5,000 requests and 1,000 queued
 notifications; plan archival before the limit. Manager lists are currently
-unpaginated. Half days, carry-forward/proration, automatic statutory eligibility,
+unpaginated. Carry-forward/proration and automatic statutory eligibility,
 full payroll/Kafka modules and the frontend are outside this implementation.
 
 Start learning with `../docs/RUN_AND_UNDERSTAND.md`, then CODE_WALKTHROUGH.md,
 ARCHITECTURE.md, ALGORITHMS.md, TESTING.md and INTEGRATION_CONTRACTS.md.
+
+## Additional business features
+
+Half-day leave, leave-day preview, private team calendar, notification read/unread, filtered/paginated requests, lifecycle audit, monthly reports and manager reminders are implemented. See [ADDITIONAL_FEATURES.md](../docs/ADDITIONAL_FEATURES.md) for endpoints and required directory scope/service credentials. Old array APIs remain compatible; new clients should use /me/requests or /requests.

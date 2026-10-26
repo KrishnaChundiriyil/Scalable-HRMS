@@ -73,6 +73,23 @@ public class EmployeeDirectoryClient {
         }));
     }
 
+    public EmployeeSummary authoritative(String employeeId,String bearer) {
+        try { return fetch(employeeId,bearer); }
+        catch (RuntimeException failure) { throw unavailableOrDenied(failure); }
+    }
+    public java.util.List<EmployeeSummary> directReports(String managerId,String bearer) {
+        try {
+            var reports = breaker.executeSupplier(() -> retry.executeSupplier(() -> http.get()
+                .uri("/api/employees/{id}/direct-reports",managerId)
+                .header(HttpHeaders.AUTHORIZATION,bearer).retrieve()
+                .body(new org.springframework.core.ParameterizedTypeReference<java.util.List<EmployeeSummary>>() {})));
+            if (reports == null || reports.size()>10000 || reports.stream().anyMatch(e ->
+                e.employeeId()==null || !managerId.equals(e.managerId())))
+                throw new IllegalStateException("Invalid direct-report scope response");
+            return reports.stream().filter(EmployeeSummary::active).toList();
+        } catch (RuntimeException failure) { throw unavailableOrDenied(failure); }
+    }
+
     /** Writes must always use the live directory and must never fall back to cache. */
     public EmployeeSummary requireActive(String employeeId, String authorizationHeader) {
         EmployeeSummary info;

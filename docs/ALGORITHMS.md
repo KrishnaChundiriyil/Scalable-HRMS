@@ -82,3 +82,33 @@ or unavailable authority prevents mutation.
 Structures: embedded outbox list, MongoDB notification collection with recipient/
 time/ID index, ConcurrentHashMap of recipient to CopyOnWriteArrayList of emitters.
 Redis Pub/Sub is live transport; MongoDB is durable history.
+
+
+## Additional algorithms
+
+Half-day allocation: validate enabled type and one working date; charge 0.5 to its
+year. Two intersecting requests conflict unless both are single-date half days
+with opposite sessions. All usage sums use only 1.0/0.5 increments, and the same
+version-checked balance checks apply to concurrent approvals/refunds.
+
+Preview: compute candidate daily/yearly allocation, compare current approved
+usage and active overlaps, return the balance/shortfall explanation without
+adding a request. Confirmation repeats validation; a preview reserves nothing.
+
+Pagination: authoritative scope match -> indexed account candidate match -> unwind
+requests -> exact row filters -> stable sort -> facet page items and total count.
+Audit events use a per-account sequence rather than timestamps alone to order ties.
+
+Reports: traverse scoped date-filtered pages, count current statuses, sum only
+currently approved saved daily allocations inside the range into month/type and
+paid/unpaid buckets, and average created-to-decided durations. Flag old records
+without per-date allocation instead of inventing charges.
+
+Reminders: scan pending requests older than 48 hours; resolve a current active
+manager; reload the account; require pending/not-past-start and at least 24 hours
+since the last reminder; append an in-app outbox event and timestamp; save with
+@Version. Concurrent scans reload on conflict and see the winner's timestamp.
+
+Notification reads: match recipient plus notification ID and readAt=null, then set
+readAt once. Read-all updates only that recipient's unread documents; history is
+retained and notification retries do not clear readAt.

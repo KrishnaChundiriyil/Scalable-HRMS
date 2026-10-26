@@ -24,10 +24,10 @@ class LeaveServiceTest {
     @Test void weekendsAndHolidaysDoNotCostOrdinaryLeave() {
         var policy = policy();
         policy.setHolidays(Set.of(LocalDate.of(2026, 11, 2)));
-        assertEquals(Map.of("2026", 2), policy.chargedDays("ANNUAL", LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 3)));
+        assertEquals(Map.of("2026", 2.0), policy.chargedDays("ANNUAL", LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 3)));
     }
     @Test void crossYearMaternityCountsCalendarDays() {
-        assertEquals(Map.of("2026", 2, "2027", 2), policy().chargedDays("MATERNITY",
+        assertEquals(Map.of("2026", 2.0, "2027", 2.0), policy().chargedDays("MATERNITY",
             LocalDate.of(2026, 12, 30), LocalDate.of(2027, 1, 2)));
     }
     @Test void invalidRangesAndWeekendOnlyRequestsAreRejected() {

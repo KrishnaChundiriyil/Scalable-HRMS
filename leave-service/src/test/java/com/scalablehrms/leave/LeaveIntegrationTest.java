@@ -38,7 +38,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {"spring.profiles.active=dev", "hrms.notifications.outbox-delay-ms=3600000"})
+    properties = {"spring.profiles.active=dev", "hrms.notifications.outbox-delay-ms=3600000", "hrms.reminders.scan-delay-ms=3600000"})
 @Testcontainers
 class LeaveIntegrationTest {
     @Container static GenericContainer<?> mongodb = new GenericContainer<>("mongo:7.0").withExposedPorts(27017);
@@ -55,6 +55,10 @@ class LeaveIntegrationTest {
             server.createContext("/api/employees/", exchange -> {
                 String id = exchange.getRequestURI().getPath().substring("/api/employees/".length());
                 Object value = employees.get(id);
+                if (id.endsWith("/direct-reports")) {
+                    String manager=id.substring(0,id.length()-"/direct-reports".length());
+                    value=employees.values().stream().filter(e -> manager.equals(e.get("managerId"))).toList();
+                }
                 int status = directoryStatus.get() == 200 ? (value == null ? 404 : 200) : directoryStatus.get();
                 byte[] body = new ObjectMapper().writeValueAsBytes(value == null ? Map.of("error", "not found") : value);
                 exchange.getResponseHeaders().set("Content-Type", "application/json");
@@ -72,6 +76,7 @@ class LeaveIntegrationTest {
         props.add("spring.data.redis.host", redisContainer::getHost);
         props.add("spring.data.redis.port", () -> redisContainer.getMappedPort(6379));
         props.add("hrms.security.jwt-secret-base64", () -> Base64.getEncoder().encodeToString(SECRET));
+        props.add("hrms.employee-service.internal-token", () -> "isolated-test-service-credential");
         props.add("hrms.employee-service.url", () -> "http://127.0.0.1:" + upstream.getAddress().getPort());
     }
     @Autowired TestRestTemplate http;
@@ -86,6 +91,11 @@ class LeaveIntegrationTest {
     @Autowired RedisRateLimiter limiter;
     @Autowired CircuitBreakerRegistry circuits;
     @Autowired LeavePolicy policy;
+    @Autowired LeaveQueryService queries;
+    @Autowired LeaveInsightsService insights;
+    @Autowired ApprovalReminderService reminders;
+    @Autowired com.scalablehrms.leave.config.ReminderPolicy reminderPolicy;
+
     @LocalServerPort int port;
     LocalDate monday;
 
@@ -93,6 +103,7 @@ class LeaveIntegrationTest {
         accounts.deleteAll(); legacy.deleteAll(); notificationRepo.deleteAll();
         try (var connection = redis.getConnectionFactory().getConnection()) { connection.serverCommands().flushDb(); }
         employees.clear();
+        reminderPolicy.setEnabled(false);
         employee("EMP1", "MGR1", true);
         employee("MGR1", "TOP", true);
         employee("MGR2", "TOP", true);
@@ -277,7 +288,11 @@ class LeaveIntegrationTest {
         failingPublisher.dispatchOutbox();
         assertEquals(1, notificationRepo.count());
         assertEquals(1, accounts.findById("EMP1").orElseThrow().outbox().size());
+        String eventId=notificationRepo.findAll().getFirst().getId();
+        notifications.markRead("EMP1",eventId);
+        var readAt=notificationRepo.findById(eventId).orElseThrow().getReadAt();
         notifications.dispatchOutbox(); notifications.dispatchOutbox();
+        assertEquals(readAt,notificationRepo.findById(eventId).orElseThrow().getReadAt());
         assertEquals(1, notificationRepo.count());
         assertTrue(accounts.findById("EMP1").orElseThrow().outbox().isEmpty());
     }
@@ -338,5 +353,232 @@ class LeaveIntegrationTest {
         expect(400,call(HttpMethod.PUT,"/api/leaves/EMP1/"+leave.id()+"/decision",token("MGR1","MANAGER"),Map.of()));
         expect(400,call(HttpMethod.GET,"/api/leaves/me/balance?year=hello",token("EMP1","EMPLOYEE"),null));
         assertTrue(expect(401,call(HttpMethod.GET,"/api/leaves/me",null,null)).has("error"));
+    }
+
+    CreateLeaveRequest half(String type,LocalDate day,LeaveSession session) {
+        return new CreateLeaveRequest(type,day,day,"Half-day appointment",session);
+    }
+    double remaining() { return ((Number)((Map<?,?>)service.balance("EMP1",monday.getYear()).get("annual")).get("remaining")).doubleValue(); }
+    void age(String id,Instant created) {
+        mongo.updateFirst(org.springframework.data.mongodb.core.query.Query.query(
+            org.springframework.data.mongodb.core.query.Criteria.where("_id").is("EMP1").and("requests.id").is(id)),
+            new org.springframework.data.mongodb.core.query.Update().set("requests.$.createdAt",created).inc("version",1),LeaveAccount.class);
+    }
+
+    @Test void halfDaysShareDateAndDeductRefundExactly() throws Exception {
+        var morning=expect(201,call(HttpMethod.POST,"/api/leaves",token("EMP1","EMPLOYEE"),half("ANNUAL",monday,LeaveSession.MORNING)));
+        assertEquals(0.5,morning.get("days").asDouble());
+        String first=morning.get("id").asText();
+        var afternoon=service.submit("EMP1",half("SICK",monday,LeaveSession.AFTERNOON),null);
+        assertThrows(ResponseStatusException.class,() -> service.submit("EMP1",half("CASUAL",monday,LeaveSession.MORNING),null));
+        assertThrows(ResponseStatusException.class,() -> submit("ANNUAL",monday,monday));
+        service.decide("EMP1",first,new DecisionRequest(true,null,null),"MGR1");
+        service.decide("EMP1",afternoon.id(),new DecisionRequest(true,null,null),"MGR1");
+        assertEquals(19.5,remaining());
+        service.cancel("EMP1",first,"Appointment cancelled");
+        assertEquals(20.0,remaining());
+    }
+
+    @Test void unsupportedOrMultiDateHalfDaysAreRejected() throws Exception {
+        expect(400,call(HttpMethod.POST,"/api/leaves",token("EMP1","EMPLOYEE"),half("MATERNITY",monday,LeaveSession.MORNING)));
+        expect(400,call(HttpMethod.POST,"/api/leaves",token("EMP1","EMPLOYEE"),
+            new CreateLeaveRequest("ANNUAL",monday,monday.plusDays(1),"Invalid multi-day half",LeaveSession.AFTERNOON)));
+        expect(400,call(HttpMethod.POST,"/api/leaves",token("EMP1","EMPLOYEE"),half("BEREAVEMENT",monday,LeaveSession.MORNING)));
+    }
+
+    @Test void previewIsReadOnlyExplainsDaysAndDetectsConflicts() throws Exception {
+        var body=Map.of("type","ANNUAL","startDate",monday.plusDays(4).toString(),"endDate",monday.plusDays(8).toString());
+        for (int i=0;i<7;i++) {
+            var preview=expect(200,call(HttpMethod.POST,"/api/leaves/preview",token("EMP1","EMPLOYEE"),body));
+            assertEquals(5,preview.get("calendarDays").asInt()); assertEquals(3.0,preview.get("chargedDays").asDouble());
+            assertEquals(17.0,preview.get("yearlyAllocation").get(Integer.toString(monday.getYear())).get("availableAfterApproval").asDouble());
+        }
+        assertEquals(0,accounts.count());
+        submit("SICK",monday.plusDays(4),monday.plusDays(4));
+        assertFalse(expect(200,call(HttpMethod.POST,"/api/leaves/preview",token("EMP1","EMPLOYEE"),body)).get("canSubmit").asBoolean());
+    }
+
+    @Test void auditIsOrderedCompleteAndScopedAndReplayDoesNotDuplicate() throws Exception {
+        var input=application("ANNUAL",monday,monday);
+        var leave=service.submit("EMP1",input,"audit-key");
+        service.submit("EMP1",input,"audit-key");
+        service.decide("EMP1",leave.id(),new DecisionRequest(true,null,null),"MGR1");
+        service.cancel("EMP1",leave.id(),"Employee changed plans");
+        var page=queries.audit("EMP1",leave.id(),0,10);
+        assertEquals(3,page.totalElements());
+        assertEquals(List.of("CANCELLED","APPROVED","SUBMITTED"),page.items().stream().map(LeaveAuditEvent::action).toList());
+        assertEquals(List.of(3L,2L,1L),page.items().stream().map(LeaveAuditEvent::sequence).toList());
+        assertEquals("MGR1",page.items().get(1).actorId());
+        expect(403,call(HttpMethod.GET,"/api/leaves/employees/EMP1/audit",token("MGR2","MANAGER"),null));
+        expect(200,call(HttpMethod.GET,"/api/leaves/me/audit?size=1",token("EMP1","EMPLOYEE"),null));
+    }
+
+    @Test void mongoPaginationFiltersAndManagerScopeAreAppliedBeforeCounting() throws Exception {
+        for (int i=0;i<7;i++) submit(i%2==0?"ANNUAL":"SICK",monday.plusWeeks(i),monday.plusWeeks(i));
+        employee("OTHER","MGR2",true);
+        service.submit("OTHER",application("ANNUAL",monday,monday),null);
+        var own=expect(200,call(HttpMethod.GET,"/api/leaves/me/requests?page=1&size=3",token("EMP1","EMPLOYEE"),null));
+        assertEquals(7,own.get("totalElements").asInt()); assertEquals(3,own.get("items").size()); assertEquals(3,own.get("totalPages").asInt());
+        var manager=expect(200,call(HttpMethod.GET,"/api/leaves/requests?size=2&type=SICK",token("MGR1","MANAGER"),null));
+        assertEquals(3,manager.get("totalElements").asInt());
+        assertEquals(8,expect(200,call(HttpMethod.GET,"/api/leaves/requests",token("HR1","HR"),null)).get("totalElements").asInt());
+        expect(403,call(HttpMethod.GET,"/api/leaves/requests?employeeId=OTHER",token("MGR1","MANAGER"),null));
+        expect(403,call(HttpMethod.GET,"/api/leaves/requests",token("EMP1","EMPLOYEE"),null));
+        expect(400,call(HttpMethod.GET,"/api/leaves/me/requests?size=0",token("EMP1","EMPLOYEE"),null));
+        assertEquals(0,expect(200,call(HttpMethod.GET,"/api/leaves/me/requests?search=.%2A",token("EMP1","EMPLOYEE"),null)).get("totalElements").asInt());
+        var date=expect(200,call(HttpMethod.GET,"/api/leaves/me/requests?from="+monday+"&to="+monday,token("EMP1","EMPLOYEE"),null));
+        assertEquals(1,date.get("totalElements").asInt());
+    }
+
+    @Test void calendarHidesReasonsAndTypesAndContainsOnlyDirectReports() throws Exception {
+        var own=service.submit("EMP1",half("SICK",monday,LeaveSession.MORNING),null);
+        service.decide("EMP1",own.id(),new DecisionRequest(true,null,null),"MGR1");
+        employee("OTHER","MGR2",true);
+        var other=service.submit("OTHER",application("ANNUAL",monday,monday),null);
+        service.decide("OTHER",other.id(),new DecisionRequest(true,null,null),"MGR2");
+        String path="/api/leaves/calendar?from="+monday+"&to="+monday.plusDays(5);
+        var calendar=expect(200,call(HttpMethod.GET,path,token("MGR1","MANAGER"),null));
+        assertEquals(1,calendar.get("totalElements").asInt());
+        var entry=calendar.get("items").get(0);
+        assertEquals("EMP1",entry.get("employeeId").asText()); assertEquals("MORNING",entry.get("session").asText());
+        assertTrue(entry.has("employeeName")); assertFalse(entry.has("type")); assertFalse(entry.has("reason"));
+        expect(403,call(HttpMethod.GET,path,token("EMP1","EMPLOYEE"),null));
+        directoryStatus.set(503);
+        expect(503,call(HttpMethod.GET,path,token("MGR1","MANAGER"),null));
+    }
+
+    @Test void notificationsCanBeReadOnlyByRecipientAndUpdatesAreIdempotent() throws Exception {
+        notificationRepo.save(new HrNotification("read-me","EMP1","leave1","Saved message",Instant.now()));
+        notificationRepo.save(new HrNotification("other-message","MGR1","leave2","Private message",Instant.now()));
+        assertEquals(1,expect(200,call(HttpMethod.GET,"/api/leaves/notifications/unread-count",token("EMP1","EMPLOYEE"),null)).get("unread").asInt());
+        expect(404,call(HttpMethod.PUT,"/api/leaves/notifications/read-me/read",token("MGR1","MANAGER"),Map.of()));
+        expect(204,call(HttpMethod.PUT,"/api/leaves/notifications/read-me/read",token("EMP1","EMPLOYEE"),Map.of()));
+        var readAt=notificationRepo.findById("read-me").orElseThrow().getReadAt();
+        expect(204,call(HttpMethod.PUT,"/api/leaves/notifications/read-me/read",token("EMP1","EMPLOYEE"),Map.of()));
+        assertEquals(readAt,notificationRepo.findById("read-me").orElseThrow().getReadAt());
+        assertEquals(0,notifications.unreadCount("EMP1")); assertEquals(1,notifications.unreadCount("MGR1"));
+        assertEquals(1,expect(200,call(HttpMethod.PUT,"/api/leaves/notifications/read-all",token("MGR1","MANAGER"),Map.of())).get("updated").asInt());
+    }
+
+    @Test void reportsClipCapturedDailyChargesAndExcludeCancelledUsage() throws Exception {
+        var month=YearMonth.of(policy.today().getYear()+1,1);
+        var leave=submit("ANNUAL",month.atEndOfMonth().minusDays(4),month.atEndOfMonth().plusDays(4));
+        service.decide("EMP1",leave.id(),new DecisionRequest(true,null,null),"MGR1");
+        LocalDate from=month.atDay(1),to=month.plusMonths(1).atEndOfMonth();
+        var report=insights.report(Set.of("EMP1"),null,from,to);
+        assertEquals(leave.days(),((Number)report.get("paidDays")).doubleValue());
+        assertEquals(true,report.get("dayTotalsComplete"));
+        var january=insights.report(Set.of("EMP1"),null,from,month.atEndOfMonth());
+        double capturedJanuary=leave.dailyCharges().entrySet().stream().filter(e -> e.getKey().startsWith(month.toString())).mapToDouble(Map.Entry::getValue).sum();
+        assertEquals(capturedJanuary,((Number)january.get("paidDays")).doubleValue());
+        var original=new HashSet<>(policy.getHolidays());
+        try {
+            policy.getHolidays().addAll(leave.dailyCharges().keySet().stream().map(LocalDate::parse).toList());
+            assertEquals(leave.days(),((Number)insights.report(Set.of("EMP1"),null,from,to).get("paidDays")).doubleValue());
+        } finally { policy.setHolidays(original); }
+        service.cancel("EMP1",leave.id(),"Travel plans cancelled");
+        assertEquals(0.0,((Number)insights.report(Set.of("EMP1"),null,from,to).get("paidDays")).doubleValue());
+        String path="/api/leaves/reports?from="+from+"&to="+to+"&employeeId=EMP1";
+        expect(403,call(HttpMethod.GET,path,token("MGR2","MANAGER"),null));
+        expect(200,call(HttpMethod.GET,path,token("MGR1","MANAGER"),null));
+    }
+
+    @Test void reportsIdentifyHistoricalRecordsWithoutDailyBreakdown() {
+        var old=LeaveLedger.fresh("EMP1",monday.getYear(),LeaveType.ANNUAL,20);
+        var entry=new LeaveEntry(); entry.setId("old-report"); entry.setStartDate(monday); entry.setEndDate(monday);
+        entry.setDays(1); entry.setStatus(LeaveStatus.APPROVED); entry.setReason("Historical record"); entry.setCreatedAt(Instant.now());
+        old.getRequests().add(entry); old.setRemainingDays(19); legacy.save(old);
+        service.mine("EMP1",null); // Import the legacy fixture added after this reused test context started.
+        var report=insights.report(Set.of("EMP1"),null,monday,monday.plusDays(4));
+        assertEquals(false,report.get("dayTotalsComplete"));
+        assertEquals(1L,report.get("legacyApprovedRequestsWithoutDailyAllocation"));
+    }
+
+    @Test void remindersWait48HoursRepeatDailyAndStopAfterCancellation() {
+        reminderPolicy.setEnabled(true);
+        var leave=submit("ANNUAL",monday,monday);
+        Instant now=Instant.now(); age(leave.id(),now.minus(Duration.ofHours(49)));
+        assertEquals(1,reminders.process(now)); assertEquals(0,reminders.process(now));
+        assertEquals(0,reminders.process(now.plus(Duration.ofHours(23))));
+        assertEquals(1,reminders.process(now.plus(Duration.ofHours(24))));
+        notifications.dispatchOutbox();
+        assertEquals(2,notifications.unreadCount("MGR1")); assertEquals(0,notifications.unreadCount("EMP1"));
+        service.cancel("EMP1",leave.id(),"No longer need this leave");
+        assertEquals(0,reminders.process(now.plus(Duration.ofHours(48))));
+    }
+
+    @Test void concurrentReminderScansQueueOnlyOneReminderPerInterval() throws Exception {
+        reminderPolicy.setEnabled(true);
+        var leave=submit("ANNUAL",monday,monday);
+        Instant now=Instant.now(); age(leave.id(),now.minus(Duration.ofHours(49)));
+        try (var executor=Executors.newFixedThreadPool(2)) {
+            int queued=0;
+            for (var result:executor.invokeAll(List.<Callable<Integer>>of(() -> reminders.process(now),() -> reminders.process(now)))) queued+=result.get();
+            assertEquals(1,queued);
+        }
+        assertEquals(1,accounts.findById("EMP1").orElseThrow().outbox().size());
+    }
+
+    @Test void remindersDeferOnDirectoryFailureAndRespectInitialDelay() {
+        reminderPolicy.setEnabled(true);
+        var leave=submit("ANNUAL",monday,monday);
+        Instant now=Instant.now();
+        assertEquals(0,reminders.process(now));
+        age(leave.id(),now.minus(Duration.ofHours(49)));
+        directoryStatus.set(503);
+        assertEquals(0,reminders.process(now)); assertTrue(accounts.findById("EMP1").orElseThrow().outbox().isEmpty());
+        directoryStatus.set(200); circuits.circuitBreaker("employeeDirectory").reset();
+        assertEquals(1,reminders.process(now));
+    }
+
+    @Test void integerAccountsFromPreviousVersionRemainReadable() {
+        var request=new org.bson.Document("_id","integer-old").append("type","ANNUAL")
+            .append("startDate",java.util.Date.from(monday.atStartOfDay(ZoneId.systemDefault()).toInstant()))
+            .append("endDate",java.util.Date.from(monday.atStartOfDay(ZoneId.systemDefault()).toInstant()))
+            .append("days",1).append("chargedDays",new org.bson.Document(Integer.toString(monday.getYear()),1))
+            .append("paid",true).append("reason","Old integer account").append("status","APPROVED").append("createdAt",new java.util.Date());
+        mongo.getCollection("leave_accounts").insertOne(new org.bson.Document("_id","EMP1").append("version",0L)
+            .append("requests",List.of(request)).append("outbox",List.of()).append("allowances",new org.bson.Document(monday.getYear()+":ANNUAL",20)));
+        var old=service.mine("EMP1",null).getFirst();
+        assertEquals(1.0,old.days()); assertEquals(LeaveSession.FULL_DAY,old.session());
+        assertEquals(19.0,remaining());
+        assertEquals(0,queries.audit("EMP1",null,0,20).totalElements());
+    }
+
+    @Test void simultaneousHalfDayApprovalsCannotOverdrawFinalHalfDay() throws Exception {
+        var full=submit("ANNUAL",monday,monday.plusDays(24));
+        service.decide("EMP1",full.id(),new DecisionRequest(true,null,null),"MGR1");
+        var prior=service.submit("EMP1",half("ANNUAL",monday.plusDays(25),LeaveSession.MORNING),null);
+        service.decide("EMP1",prior.id(),new DecisionRequest(true,null,null),"MGR1");
+        assertEquals(0.5,remaining());
+        var first=service.submit("EMP1",half("ANNUAL",monday.plusWeeks(5),LeaveSession.MORNING),null);
+        var second=service.submit("EMP1",half("ANNUAL",monday.plusWeeks(6),LeaveSession.MORNING),null);
+        try (var executor=Executors.newFixedThreadPool(2)) {
+            var results=new ArrayList<Integer>();
+            for (var future:executor.invokeAll(List.<Callable<Integer>>of(() -> approveStatus(first.id()),() -> approveStatus(second.id())))) results.add(future.get());
+            Collections.sort(results); assertEquals(List.of(200,409),results);
+        }
+        assertEquals(0.0,remaining());
+    }
+
+    @Test void reportsIncludeUnpaidPendingRejectedAndDecisionDurations() {
+        var unpaid=submit("UNPAID",monday,monday.plusDays(1));
+        age(unpaid.id(),Instant.now().minus(Duration.ofHours(2)));
+        service.decide("EMP1",unpaid.id(),new DecisionRequest(true,null,null),"MGR1");
+        submit("SICK",monday.plusWeeks(1),monday.plusWeeks(1));
+        var rejected=submit("CASUAL",monday.plusWeeks(2),monday.plusWeeks(2));
+        service.decide("EMP1",rejected.id(),new DecisionRequest(false,"Team coverage unavailable",null),"MGR1");
+        var report=insights.report(Set.of("EMP1"),null,monday,monday.plusDays(20));
+        assertEquals(3L,report.get("requestCount")); assertEquals(1L,report.get("pendingRequests"));
+        assertEquals(2.0,((Number)report.get("unpaidDays")).doubleValue()); assertEquals(0.0,((Number)report.get("paidDays")).doubleValue());
+        assertTrue(((Number)report.get("averageDecisionSeconds")).doubleValue()>=3600);
+        assertEquals(2L,report.get("decidedRequests"));
+    }
+
+    @Test void employeeCannotCancelSomeoneElsesRequest() throws Exception {
+        employee("OTHER","MGR2",true);
+        var foreign=service.submit("OTHER",application("ANNUAL",monday,monday),null);
+        expect(404,call(HttpMethod.POST,"/api/leaves/me/"+foreign.id()+"/cancel",token("EMP1","EMPLOYEE"),Map.of("reason","Forged cancellation attempt")));
+        assertEquals(LeaveStatus.PENDING,service.mine("OTHER",null).getFirst().status());
     }
 }

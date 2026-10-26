@@ -64,6 +64,20 @@ public class NotificationService implements MessageListener {
         }
     }
 
+    public long unreadCount(String employee) {
+        return mongo.count(Query.query(Criteria.where("recipientId").is(employee).and("readAt").is(null)),HrNotification.class);
+    }
+    public void markRead(String employee,String id) {
+        Query owned = Query.query(Criteria.where("_id").is(id).and("recipientId").is(employee));
+        if (!mongo.exists(owned,HrNotification.class))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Notification not found");
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(id).and("recipientId").is(employee).and("readAt").is(null)),
+            new Update().set("readAt",Instant.now()),HrNotification.class);
+    }
+    public long markAllRead(String employee) {
+        return mongo.updateMulti(Query.query(Criteria.where("recipientId").is(employee).and("readAt").is(null)),
+            new Update().set("readAt",Instant.now()),HrNotification.class).getModifiedCount();
+    }
     public List<HrNotification> recent(String employee, String after, int limit) {
         return history(employee, after, null, limit);
     }

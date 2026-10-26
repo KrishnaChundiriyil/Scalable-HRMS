@@ -4,6 +4,7 @@ A shared HRMS project. This repository currently contains the Leave Management a
 
 - [Run the backend](leave-service/README.md)
 - [Understand the flow](docs/RUN_AND_UNDERSTAND.md)
+- [Additional business features](docs/ADDITIONAL_FEATURES.md)
 - [Leave rules and editable allowances](docs/LEAVE_POLICY.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Code walkthrough](docs/CODE_WALKTHROUGH.md)

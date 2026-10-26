@@ -5,13 +5,19 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 @Document(collection="hr_notifications")
-@org.springframework.data.mongodb.core.index.CompoundIndex(name="recipient_history", def="{'recipientId':1,'createdAt':1,'_id':1}")
+@org.springframework.data.mongodb.core.index.CompoundIndexes({
+    @org.springframework.data.mongodb.core.index.CompoundIndex(name="recipient_history",def="{'recipientId':1,'createdAt':1,'_id':1}"),
+    @org.springframework.data.mongodb.core.index.CompoundIndex(name="recipient_unread",def="{'recipientId':1,'readAt':1}")
+})
 public class HrNotification {
     @Id private String id;
     private String recipientId;
     private String leaveId;
     private String message;
     private Instant createdAt;
+    private Instant readAt;
+    public Instant getReadAt() { return readAt; }
+    public void setReadAt(Instant readAt) { this.readAt = readAt; }
 
     public HrNotification() { }
     public HrNotification(String id, String recipientId, String leaveId, String message, Instant createdAt) {

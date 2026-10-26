@@ -87,7 +87,7 @@ public class SecurityConfiguration {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/leaves/pending", "/api/leaves/employees/**")
+                .requestMatchers(HttpMethod.GET, "/api/leaves/pending", "/api/leaves/employees/**", "/api/leaves/requests", "/api/leaves/calendar", "/api/leaves/reports")
                     .hasAnyRole("MANAGER", "HR", "ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/leaves/*/*/decision").hasAnyRole("MANAGER", "HR", "ADMIN")
                 .requestMatchers("/api/dev/**").authenticated()

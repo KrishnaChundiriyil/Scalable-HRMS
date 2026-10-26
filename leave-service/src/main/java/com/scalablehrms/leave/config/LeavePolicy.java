@@ -17,6 +17,10 @@ public class LeavePolicy {
     private Set<LocalDate> holidays = new HashSet<>();
     private ZoneId timezone = ZoneId.of("Asia/Kolkata");
     private int maxRequests = 5000;
+    private Set<String> halfDayTypes = new HashSet<>(Set.of("ANNUAL","SICK","CASUAL"));
+    public Set<String> getHalfDayTypes() { return halfDayTypes; }
+    public void setHalfDayTypes(Set<String> values) { this.halfDayTypes = values; }
+
 
     public Map<String, TypePolicy> getTypes() { return types; }
     public void setTypes(Map<String, TypePolicy> types) { this.types = types; }
@@ -44,26 +48,36 @@ public class LeavePolicy {
         return policy;
     }
 
-    public Map<String, Integer> chargedDays(String type, LocalDate start, LocalDate end) {
+    public Map<String, Double> chargedDays(String type, LocalDate start, LocalDate end) {
+        return allocateByYear(dailyCharges(type,start,end,com.scalablehrms.leave.domain.LeaveSession.FULL_DAY));
+    }
+    public Map<String,Double> allocateByYear(Map<String,Double> daily) {
+        Map<String,Double> yearly = new LinkedHashMap<>();
+        daily.forEach((date,days) -> yearly.merge(date.substring(0,4),days,Double::sum));
+        return yearly;
+    }
+    public Map<String,Double> dailyCharges(String type, LocalDate start, LocalDate end,
+                                           com.scalablehrms.leave.domain.LeaveSession session) {
         if (start == null || end == null || end.isBefore(start))
             throw new IllegalArgumentException("End date cannot precede start date");
         if (start.isBefore(today())) throw new IllegalArgumentException("Cannot request leave starting in the past");
-        if (java.time.temporal.ChronoUnit.DAYS.between(start, end) > 730)
+        if (java.time.temporal.ChronoUnit.DAYS.between(start,end) > 730)
             throw new IllegalArgumentException("Date range is too long");
-        TypePolicy policy = rule(type);
-        Map<String, Integer> charges = new LinkedHashMap<>();
-        for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
-            if (policy.counting() == Counting.CALENDAR_DAYS ||
-                (date.getDayOfWeek() != DayOfWeek.SATURDAY && date.getDayOfWeek() != DayOfWeek.SUNDAY
-                    && !holidays.contains(date))) {
-                charges.merge(Integer.toString(date.getYear()), 1, Integer::sum);
-            }
+        TypePolicy rule = rule(type);
+        boolean half = session != com.scalablehrms.leave.domain.LeaveSession.FULL_DAY;
+        if (half && (!halfDayTypes.contains(type) || !start.equals(end)))
+            throw new IllegalArgumentException("Half days require a single date and an enabled leave type");
+        Map<String,Double> result = new LinkedHashMap<>();
+        for (LocalDate date=start; !date.isAfter(end); date=date.plusDays(1)) {
+            if (rule.counting() == Counting.CALENDAR_DAYS || (date.getDayOfWeek()!=DayOfWeek.SATURDAY
+                && date.getDayOfWeek()!=DayOfWeek.SUNDAY && !holidays.contains(date)))
+                result.put(date.toString(),half ? 0.5 : 1.0);
         }
-        int days = charges.values().stream().mapToInt(Integer::intValue).sum();
+        double days = result.values().stream().mapToDouble(Double::doubleValue).sum();
         if (days == 0) throw new IllegalArgumentException("No chargeable working days in this range");
-        if (days > policy.maxPerRequest()) throw new IllegalArgumentException("Leave exceeds the per-request limit");
-        if (policy.yearlyAllowance() >= 0 && charges.values().stream().anyMatch(d -> d > policy.yearlyAllowance()))
+        if (days > rule.maxPerRequest()) throw new IllegalArgumentException("Leave exceeds the per-request limit");
+        if (rule.yearlyAllowance() >= 0 && allocateByYear(result).values().stream().anyMatch(d -> d > rule.yearlyAllowance()))
             throw new IllegalArgumentException("Leave exceeds the yearly allowance");
-        return charges;
+        return result;
     }
 }

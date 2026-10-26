@@ -19,6 +19,16 @@ public class EmployeeAccess {
         var roles = actor.getClaimAsStringList("roles");
         return hr(actor) || (roles != null && roles.contains("MANAGER") && actor.getSubject().equals(employee.managerId()));
     }
+    /** Null denotes HR/Admin all-employee scope; an empty set denotes no direct reports. */
+    public java.util.Set<String> scope(Jwt actor,String bearer) {
+        active(actor,bearer);
+        if (hr(actor)) return null;
+        var roles = actor.getClaimAsStringList("roles");
+        if (roles==null || !roles.contains("MANAGER"))
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Reviewer role required");
+        return directory.directReports(actor.getSubject(),bearer).stream().map(EmployeeSummary::employeeId)
+            .collect(java.util.stream.Collectors.toSet());
+    }
     public void review(Jwt actor, String bearer, String employeeId) {
         if (actor.getSubject().equals(employeeId))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot decide your own leave");

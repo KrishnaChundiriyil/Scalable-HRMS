@@ -44,7 +44,7 @@ cd /home/krish/Downloads/Scalable-HRMS/leave-service
 mvn clean verify
 ```
 
-31 tests passed during implementation. This includes approval, cancellation,
+The expanded feature suite is documented in TESTING.md. This includes approval, cancellation,
 manager permissions, concurrent requests, live SSE, rate limits and circuit
 recovery. Reports are in target/surefire-reports; the regular local database is
 not used by those tests. Docker must be running and accessible to your user.
@@ -124,5 +124,7 @@ important class/method and annotation; ALGORITHMS.md gives presentation steps.
 See LEAVE_POLICY.md for your agreed rules and editable defaults, TESTING.md for
 actual verification, and INTEGRATION_CONTRACTS.md for what teammates must provide.
 The frontend, actual employee login, payroll calculations and Kafka remain separate
-team integrations. Half days, carry-forward and automatic legal eligibility are
+team integrations. Carry-forward and automatic legal eligibility are
 not implemented policies in this version.
+
+The eight additional features and example APIs are explained in [ADDITIONAL_FEATURES.md](ADDITIONAL_FEATURES.md). New requests can use MORNING/AFTERNOON sessions, and you can preview the number of charged days before applying.

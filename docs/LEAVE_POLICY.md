@@ -38,7 +38,7 @@ Company and applicable legal requirements must be confirmed before real deployme
 - Date comparisons use `Asia/Kolkata`, configurable in `hrms.leave.timezone`.
 - New requests cannot start in the past. Same-day requests are possible, but an
   employee can cancel only while today is strictly before the start date.
-- A range with no chargeable days is rejected. Half days are not implemented.
+- A range with no chargeable days is rejected. Annual, Sick and Casual allow single-date MORNING/AFTERNOON half days (0.5 each).
 - Cross-year requests are supported. Chargeable days are stored separately for
   each year; an annual cap is checked against the portion in each year.
 - There is no carry-forward or joining-date proration in this project policy.
@@ -66,7 +66,7 @@ APPROVED --cancel before start--> CANCELLED (days restored)
 
 Rejected/cancelled requests cannot be decided or cancelled again. A decided
 request cannot be approved twice. Cancelled/rejected periods can be requested
-again. Pending/approved date ranges cannot overlap across any leave types.
+again. Pending/approved full-day ranges cannot overlap across any leave types. Complementary MORNING and AFTERNOON sessions on the same date may coexist; matching sessions cannot.
 Approval is permitted on the start date but not after it. Cancellation requires a
 5–500 character reason. Parental approval needs a 5–500 character eligibility note.
 
@@ -87,3 +87,5 @@ hrms.leave.types[STUDY].paid=true
 hrms.leave.types[STUDY].counting=WORKING_DAYS
 hrms.leave.types[STUDY].eligibility-review-required=false
 ```
+
+Approval reminders start after 48 hours pending and repeat every 24 hours. The team calendar displays names and absence sessions while hiding type/reason. See [ADDITIONAL_FEATURES.md](ADDITIONAL_FEATURES.md).

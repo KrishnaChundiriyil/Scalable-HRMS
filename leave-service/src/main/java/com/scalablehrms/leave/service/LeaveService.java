@@ -32,6 +32,7 @@ public class LeaveService {
             LeaveRequest result = operation.apply(account);
             if (account.outbox().size() > 1000) throw conflict("Notification backlog; please retry later");
             try {
+                store.checkSize(account);
                 accounts.save(account);
                 return LeaveView.of(employee, result);
             } catch (OptimisticLockingFailureException | DuplicateKeyException concurrent) {
@@ -50,28 +51,30 @@ public class LeaveService {
                 for (LeaveRequest prior : account.requests()) {
                     if (idempotencyKey.equals(prior.idempotencyKey())) {
                         if (!prior.type().equals(input.type()) || !prior.startDate().equals(input.startDate())
-                            || !prior.endDate().equals(input.endDate()) || !prior.reason().equals(reason))
+                            || !prior.endDate().equals(input.endDate()) || !prior.reason().equals(reason) || prior.session()!=input.session())
                             throw conflict("Idempotency-Key was already used for another request");
                         return prior;
                     }
                 }
             }
-            var charges = policy.chargedDays(input.type(), input.startDate(), input.endDate());
+            var daily = policy.dailyCharges(input.type(),input.startDate(),input.endDate(),input.session());
+            var charges = policy.allocateByYear(daily);
             var rule = policy.rule(input.type());
             if (account.requests().size() >= policy.getMaxRequests())
                 throw conflict("Employee history capacity reached; administrator archival required");
             for (LeaveRequest prior : account.requests()) {
                 if ((prior.status() == LeaveStatus.PENDING || prior.status() == LeaveStatus.APPROVED)
-                    && !input.endDate().isBefore(prior.startDate()) && !input.startDate().isAfter(prior.endDate()))
+                    && overlaps(prior,input.startDate(),input.endDate(),input.session()))
                     throw conflict("Overlapping pending or approved leave exists");
             }
             // Pending requests do not reserve balance, but a request must fit the current balance.
             ensureBalance(account, input.type(), charges);
             charges.keySet().forEach(year -> account.allowances().putIfAbsent(year + ":" + input.type(), rule.yearlyAllowance()));
             var request = new LeaveRequest(UUID.randomUUID().toString(), input.type(), input.startDate(), input.endDate(),
-                charges.values().stream().mapToInt(Integer::intValue).sum(), charges, rule.paid(), reason,
-                LeaveStatus.PENDING, Instant.now(), null, null, null, null, null, null, idempotencyKey);
+                charges.values().stream().mapToDouble(Double::doubleValue).sum(), charges, rule.paid(), reason,
+                LeaveStatus.PENDING, Instant.now(), null, null, null, null, null, null, idempotencyKey,input.session(),daily);
             account.requests().add(request);
+            audit(account,request.id(),employee,"SUBMITTED",null,LeaveStatus.PENDING,reason);
             return request;
         });
     }
@@ -92,6 +95,7 @@ public class LeaveService {
             }
             var decided = prior.decided(input.approve(), reviewer, rejection, eligibility);
             account.requests().set(account.requests().indexOf(prior), decided);
+            audit(account,id,reviewer,input.approve() ? "APPROVED" : "REJECTED",prior.status(),decided.status(),rejection);
             enqueue(account, id, input.approve() ? "Your leave request was approved" : "Your leave request was rejected: " + rejection);
             return decided;
         });
@@ -107,11 +111,49 @@ public class LeaveService {
                 throw conflict("Cancellation is allowed only before the leave start date");
             var cancelled = prior.cancelled(why);
             account.requests().set(account.requests().indexOf(prior), cancelled);
+            audit(account,id,employee,"CANCELLED",prior.status(),LeaveStatus.CANCELLED,why);
             enqueue(account, id, "Your leave request was cancelled");
             return cancelled;
         });
     }
 
+    private void audit(LeaveAccount account, String id, String actor, String action,
+            LeaveStatus from, LeaveStatus to, String reason) {
+        account.auditTrail().add(new LeaveAuditEvent(UUID.randomUUID().toString(),id,actor,action,from,to,Instant.now(),reason,account.auditTrail().size()+1L));
+    }
+    public boolean overlaps(LeaveRequest prior, LocalDate start, LocalDate end, LeaveSession session) {
+        if (end.isBefore(prior.startDate()) || start.isAfter(prior.endDate())) return false;
+        return !(start.equals(end) && prior.startDate().equals(prior.endDate())
+            && session!=LeaveSession.FULL_DAY && prior.session()!=LeaveSession.FULL_DAY && session!=prior.session());
+    }
+    public Map<String,Object> preview(String employee, String type, LocalDate start, LocalDate end, LeaveSession session) {
+        var daily = policy.dailyCharges(type,start,end,session);
+        var charges = policy.allocateByYear(daily);
+        var account = store.load(employee);
+        var conflicts = account.requests().stream().filter(r -> (r.status()==LeaveStatus.PENDING || r.status()==LeaveStatus.APPROVED)
+            && overlaps(r,start,end,session)).map(LeaveRequest::id).toList();
+        boolean affordable = true;
+        var yearly = new LinkedHashMap<String,Object>();
+        for (var charge : charges.entrySet()) {
+            int cap = allowance(account,type,charge.getKey());
+            double available = cap < 0 ? 0 : Math.max(0,cap-used(account,type,charge.getKey()));
+            if (cap >= 0 && available < charge.getValue()) affordable = false;
+            var allocation = new LinkedHashMap<String,Object>();
+            allocation.put("days",charge.getValue());
+            allocation.put("availableBefore",cap < 0 ? null : available);
+            allocation.put("availableAfterApproval",cap < 0 ? null : Math.max(0,available-charge.getValue()));
+            allocation.put("shortfall",cap < 0 ? 0 : Math.max(0,charge.getValue()-available));
+            yearly.put(charge.getKey(),allocation);
+        }
+        var result = new LinkedHashMap<String,Object>();
+        result.put("type",type); result.put("session",session);
+        result.put("calendarDays",java.time.temporal.ChronoUnit.DAYS.between(start,end)+1);
+        result.put("chargedDays",daily.values().stream().mapToDouble(Double::doubleValue).sum());
+        result.put("excludedCalendarDays",java.time.temporal.ChronoUnit.DAYS.between(start,end)+1-daily.size());
+        result.put("yearlyAllocation",yearly); result.put("conflictingRequestIds",conflicts);
+        result.put("canSubmit",affordable && conflicts.isEmpty()); result.put("deductedOnApproval",true);
+        return result;
+    }
     private void enqueue(LeaveAccount account, String leaveId, String message) {
         account.outbox().add(new HrNotification(UUID.randomUUID().toString(), account.id(), leaveId, message, Instant.now()));
     }
@@ -120,12 +162,12 @@ public class LeaveService {
         return account.allowances().getOrDefault(year + ":" + type, policy.rule(type).yearlyAllowance());
     }
 
-    private int used(LeaveAccount account, String type, String year) {
+    private double used(LeaveAccount account, String type, String year) {
         return account.requests().stream().filter(r -> r.type().equals(type) && r.status() == LeaveStatus.APPROVED)
-            .mapToInt(r -> r.chargedDays().getOrDefault(year, 0)).sum();
+            .mapToDouble(r -> r.chargedDays().getOrDefault(year, 0.0)).sum();
     }
 
-    private void ensureBalance(LeaveAccount account, String type, Map<String,Integer> charges) {
+    private void ensureBalance(LeaveAccount account, String type, Map<String,Double> charges) {
         charges.forEach((year, days) -> {
             int allowance = allowance(account, type, year);
             if (allowance >= 0 && used(account, type, year) + days > allowance)
@@ -141,7 +183,7 @@ public class LeaveService {
         result.put("year", year);
         policy.getTypes().forEach((type, rule) -> {
             int entitled = allowance(account, type, Integer.toString(year));
-            int used = used(account, type, Integer.toString(year));
+            double used = used(account, type, Integer.toString(year));
             var value = new LinkedHashMap<String,Object>();
             value.put("entitled", entitled < 0 ? null : entitled);
             value.put("used", used);

@@ -66,12 +66,9 @@ public class LeaveController {
     @GetMapping("/pending")
     public List<LeaveView> pending(@AuthenticationPrincipal Jwt jwt,
             @RequestHeader("Authorization") String bearer, @RequestParam(required=false) Integer year) {
-        access.active(jwt, bearer);
+        var scope = access.scope(jwt,bearer);
         var pending = leaves.pending(year == null ? policy.today().getYear() : year);
-        if (access.hr(jwt)) return pending;
-        Map<String,Boolean> permitted = new HashMap<>();
-        return pending.stream().filter(item -> permitted.computeIfAbsent(item.employeeId(),
-            id -> access.manages(jwt, directory.requireActive(id, bearer)))).toList();
+        return scope==null ? pending : pending.stream().filter(item -> scope.contains(item.employeeId())).toList();
     }
     @PutMapping("/{employeeId}/{leaveId}/decision")
     public LeaveView decision(@AuthenticationPrincipal Jwt jwt, @RequestHeader("Authorization") String bearer,

@@ -83,7 +83,7 @@ Cancellation: `{"reason":"Travel plans changed"}`.
 
 The response includes ID, employeeId, type, dates, days, `chargedDays` keyed by
 year, paid flag, reason, status, createdAt, decision/reviewer/rejection fields,
-and cancellation/eligibility fields. Fields without a value are null.
+and cancellation/eligibility fields, session and dailyCharges. Fields without a value are null.
 `Idempotency-Key` (1–128 letters/digits/dot/underscore/colon/hyphen) is scoped to
 an employee. A matching submission replay returns the same request with 201;
 using its key for another payload returns 409. Rate limiting still applies.
@@ -127,3 +127,40 @@ fetch with Authorization; reconnect with fresh tokens, deduplicate event IDs and
 refresh paginated history, including after delayed outbox delivery. No JWT query
 parameters and no employee-facing rate-bucket/circuit-breaker controls. Browser
 origins/CORS must be agreed with deployment; no permissive wildcard is enabled.
+
+
+## Direct-report endpoint for the additional features
+
+Person 1 must implement:
+
+`GET /api/employees/{managerId}/direct-reports`
+
+It accepts the forwarded manager/HR JWT and returns a complete JSON array of
+EmployeeSummary objects (same fields as the individual lookup). Every returned
+record must have managerId exactly matching the requested manager. Empty array
+means no direct reports. Current implementation accepts up to 10,000 records and
+fails safely on invalid/incomplete responses; a future larger directory should
+agree on paginated traversal. Only active direct reports enter current manager
+scope. The directory must enforce caller permissions before returning names/IDs.
+
+```json
+[{"employeeId":"EMP001","name":"Example Employee","department":"Engineering","active":true,"managerId":"MGR001"}]
+```
+
+This authoritative scope is used by manager pending lists, paginated search,
+calendar and reports. It prevents reading unrelated employees just to discover
+whether they belong to the manager. HR/Admin scope still requires a live active
+reviewer; individual names are retrieved through the existing employee endpoint.
+
+For scheduled reminders, issue a restricted internal service credential through
+EMPLOYEE_SERVICE_INTERNAL_TOKEN. It must allow the Leave backend to read the
+pending employee's active/managerId information and the assigned manager's active
+status through the existing individual lookup. It must not grant arbitrary
+browser approval rights. Manage expiry/rotation in the identity system and update
+configuration on rotation. This backend does not implement Person 1's token issuer.
+
+See [ADDITIONAL_FEATURES.md](ADDITIONAL_FEATURES.md) for preview/session fields,
+paginated endpoints, calendar privacy, audit sequences, notification read state,
+report definitions and reminder configuration. All new reviewer endpoints enforce
+MANAGER/HR/ADMIN roles plus current directory scope. Self endpoints always use the
+signed subject.

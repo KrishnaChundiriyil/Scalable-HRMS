@@ -98,12 +98,26 @@ No source collections are dropped by application migration.
 
 An account is capped at 5,000 requests (configurable up to 10,000) and 1,000 pending
 outbox items. This bounds document growth for this mini-project; long-term
-archival is an operator task before reaching the cap. Manager lists currently
-load accounts without server-side pagination, suitable for project scale rather
-than unlimited enterprise datasets. Decisions fail closed during Employee
+archival is an operator task before reaching the cap. New request-list APIs perform MongoDB filtering, sorting, pagination and counts. Legacy array endpoints remain for compatibility; new clients should use the paginated routes. Decisions fail closed during Employee
 Service outages. JWT roles remain valid for the issued token lifetime; Person 1
 owns token lifetimes/revocation policy and employee facts.
 
 Employee registration/login, payroll calculation, Kafka infrastructure/consumer,
 and React belong to teammates/future integration. Leave exposes scoped approved
 history and documented event contracts; it does not pretend those modules exist.
+
+## Additional feature architecture
+
+LeaveRequest now captures FULL_DAY/MORNING/AFTERNOON and exact daily charges.
+LeaveAccount additionally holds append-only lifecycle audit events and reminder
+markers. Missing fields on old records default safely; old integer day counts
+remain valid. A 12 MiB encoded-document limit guards growth from daily/audit data.
+LeaveQueryService runs scoped MongoDB aggregations with indexed candidate filters
+and bounded pages. LeaveInsightsService maps approved rows to a privacy-limited
+calendar DTO and calculates scoped reports from daily allocations.
+
+ApprovalReminderService uses a separate internal directory credential, verifies
+current manager relationships and saves reminder markers and outbox events
+atomically. NotificationService stores idempotent recipient-owned readAt state;
+retries cannot reset it. The feature endpoints are in LeaveFeaturesController.
+See ADDITIONAL_FEATURES.md for exact behavior and migration/report caveats.

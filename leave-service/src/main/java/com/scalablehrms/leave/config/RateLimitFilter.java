@@ -22,6 +22,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.limiter=limiter; this.mapper=mapper;
     }
     @Override protected boolean shouldNotFilter(HttpServletRequest request) {
+        if (request.getRequestURI().equals("/api/leaves/preview")) return true;
         boolean mutation = request.getMethod().equals("POST") || request.getMethod().equals("PUT")
             || request.getMethod().equals("DELETE") || request.getMethod().equals("PATCH");
         return !mutation || !(request.getRequestURI().startsWith("/api/leaves/") ||

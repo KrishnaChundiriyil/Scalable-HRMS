@@ -11,7 +11,11 @@ import org.springframework.stereotype.Service;
 public class AccountStore {
     private final LeaveAccountRepository accounts;
     private final LeaveLedgerRepository legacy;
-    public AccountStore(LeaveAccountRepository accounts, LeaveLedgerRepository legacy) {
+    private final org.springframework.data.mongodb.core.MongoTemplate mongo;
+    private volatile boolean imported;
+
+    public AccountStore(LeaveAccountRepository accounts, LeaveLedgerRepository legacy, org.springframework.data.mongodb.core.MongoTemplate mongo) {
+        this.mongo = mongo;
         this.accounts = accounts;
         this.legacy = legacy;
     }
@@ -34,9 +38,22 @@ public class AccountStore {
             catch (DuplicateKeyException concurrentImport) { return accounts.findById(employeeId).orElseThrow(); }
         });
     }
+    public synchronized void importLegacy() {
+        if (imported) return;
+        try (var cursor = mongo.getCollection("leave_ledgers").distinct("employeeId",String.class).iterator()) {
+            while (cursor.hasNext()) load(cursor.next());
+        }
+        imported = true;
+    }
+    public void checkSize(LeaveAccount account) {
+        var document = new org.bson.Document();
+        mongo.getConverter().write(account,document);
+        int bytes = new org.bson.RawBsonDocument(document,new org.bson.codecs.DocumentCodec()).getByteBuffer().remaining();
+        if (bytes > 12*1024*1024) throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.CONFLICT,"Employee history requires archival before further updates");
+    }
     public List<LeaveAccount> all() {
-        // Import untouched old accounts before manager/report queries. Old writers must be stopped.
-        legacy.findAll().stream().map(LeaveLedger::getEmployeeId).distinct().forEach(this::load);
+        importLegacy();
         return accounts.findAll();
     }
 }

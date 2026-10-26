@@ -44,6 +44,10 @@
     {
       "key": "year",
       "value": ""
+    },
+    {
+      "key": "auditLeaveId",
+      "value": ""
     }
   ],
   "event": [
@@ -510,6 +514,262 @@
             }
           }
         }
+      }
+    },
+    {
+      "name": "Preview charged days without applying",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/leaves/preview",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{employeeToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": "",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"ANNUAL\",\n  \"startDate\": \"{{startDate}}\",\n  \"endDate\": \"{{endDate}}\",\n  \"session\": \"FULL_DAY\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Apply for morning half day",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/leaves",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{employeeToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": "Use dates without a conflicting full-day application. MORNING/AFTERNOON is enabled only for Annual/Sick/Casual.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"CASUAL\",\n  \"startDate\": \"{{startDate}}\",\n  \"endDate\": \"{{startDate}}\",\n  \"session\": \"MORNING\",\n  \"reason\": \"Morning appointment\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Search my requests with pagination",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/leaves/me/requests?page=0&size=20&type=ANNUAL&status=PENDING&from={{startDate}}&to={{endDate}}",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{employeeToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Manager scoped request search",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/leaves/requests?page=0&size=20&employeeId={{employeeId}}",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{managerToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": "Requires the new live direct-reports endpoint from Employee Service."
+      }
+    },
+    {
+      "name": "Private team calendar",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/leaves/calendar?from={{startDate}}&to={{endDate}}&page=0&size=20",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{managerToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": "Approved absences only. No leave types/reasons appear in the response."
+      }
+    },
+    {
+      "name": "My audit trail",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/leaves/me/audit?page=0&size=20",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{employeeToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Manager views employee audit",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/leaves/employees/{{employeeId}}/audit?page=0&size=20",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{managerToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "My leave report",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/leaves/me/reports?from={{startDate}}&to={{endDate}}",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{employeeToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Scoped team leave report",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/leaves/reports?from={{startDate}}&to={{endDate}}",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{managerToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Unread notification count",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/leaves/notifications/unread-count",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{employeeToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Mark notification read",
+      "request": {
+        "method": "PUT",
+        "url": "{{baseUrl}}/api/leaves/notifications/{{notificationId}}/read",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{employeeToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Mark all own notifications read",
+      "request": {
+        "method": "PUT",
+        "url": "{{baseUrl}}/api/leaves/notifications/read-all",
+        "header": [],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{employeeToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "description": ""
       }
     }
   ]

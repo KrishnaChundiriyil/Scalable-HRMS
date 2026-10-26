@@ -100,3 +100,35 @@ real Employee Service identities exist. The Postman collection contains business
 requests and empty credential variables. Dockerfile packages a non-root Java
 runtime; Compose starts persistent development MongoDB/Redis and optionally the
 application. CI executes clean verify including container tests.
+
+
+## Additional feature classes and methods
+
+- LeaveSession defines FULL_DAY, MORNING, AFTERNOON. LeaveRequest defaults old data
+  to FULL_DAY and carries captured dailyCharges; LeaveView includes those fields.
+- LeavePolicy.dailyCharges validates allowed half-day types/single dates and
+  captures per-date amounts; allocateByYear groups the captured values.
+- LeaveService.overlaps allows complementary half-day sessions but blocks full-day
+  or same-session conflicts. preview calculates balances/conflicts without saving
+  an application. audit appends a monotonic sequence event inside each mutation.
+- LeaveAuditEvent stores verified actor, action, state transition, time and reason.
+  LeaveAccount defaults missing audit/reminder lists/maps for prior documents.
+- AccountStore.importLegacy traverses old employee IDs once with a MongoDB cursor;
+  checkSize measures encoded BSON before writes and rejects excessive growth.
+- LeaveSearch validates page/filter input. PageResult returns items and page totals.
+- LeaveQueryService.requests performs scope/match/unwind/sort/facet aggregation in
+  MongoDB. audit paginates events ordered by their account sequence.
+- EmployeeDirectoryClient.directReports reads and validates the authoritative team
+  endpoint. authoritative retrieves metadata without using cached write authority.
+  EmployeeAccess.scope returns a manager's current report IDs or HR/Admin scope.
+- LeaveInsightsService.calendar emits a dedicated DTO without type/reason fields.
+  report sums captured approved daily charges into monthly/type/paid totals and
+  reports decision times/status counts; old missing daily details are flagged.
+- NotificationService.unreadCount/markRead/markAllRead enforce recipient scope;
+  markRead retains the first readAt and dispatcher upserts never overwrite it.
+- ReminderPolicy binds 48-hour/24-hour configuration. ApprovalReminderService scans
+  due accounts in batches, validates the current manager using a restricted service
+  token, and commits outbox notifications plus reminder timestamps atomically.
+- LeaveFeaturesController exposes preview, search, calendar, audit, reports and
+  notification read APIs. Reviewer routes are explicitly role-protected by
+  SecurityConfiguration. Preview bypasses write rate limiting as a read operation.
