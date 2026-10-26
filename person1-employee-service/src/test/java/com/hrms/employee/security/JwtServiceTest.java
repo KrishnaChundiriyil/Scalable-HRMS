@@ -17,6 +17,7 @@ class JwtServiceTest {
         ReflectionTestUtils.setField(service,"issuer","hrms-employee-service");
         ReflectionTestUtils.setField(service,"audience","hrms-leave-service");
         ReflectionTestUtils.setField(service,"recruitmentAudience","hrms-recruitment-service");
+        ReflectionTestUtils.setField(service,"payrollAudience","hrms-payroll-service");
         ReflectionTestUtils.setField(service,"expirationMs",60000L);
         return service;
     }
@@ -31,7 +32,7 @@ class JwtServiceTest {
         assertEquals(List.of("MANAGER"),claims.get("roles"));
         assertEquals("employee@example.test",claims.get("email"));
         assertNotNull(claims.getExpiration());
-        assertEquals(Set.of("hrms-leave-service","hrms-recruitment-service"),claims.getAudience());
+        assertEquals(Set.of("hrms-leave-service","hrms-recruitment-service","hrms-payroll-service"),claims.getAudience());
     }
     @Test void rejectsWrongIssuerAndAudienceEvenWithCorrectSignature() {
         var service=service();

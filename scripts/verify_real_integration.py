@@ -6,6 +6,7 @@ No dev JWTs, directory stubs, existing databases, or fixed account passwords.
 """
 import base64
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 import json
 import os
@@ -26,6 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--with-recruitment',action='store_true',help='Also verify Recruitment using a real Kafka broker')
+    parser.add_argument('--with-payroll',action='store_true',help='Also verify three Payroll instances through Nginx')
     options=parser.parse_args()
     logs = Path(tempfile.mkdtemp(prefix="hrms-real-integration-"))
     processes, containers, files = [], [], []
@@ -74,10 +76,10 @@ def main():
         containers.append(name)
         return port
 
-    def start(module, jar, env):
-        output = (logs / f"{module}.log").open("w")
+    def start(module, jar, env,label=None):
+        output = (logs / f"{label or module}.log").open("w")
         files.append(output)
-        process = subprocess.Popen(["java", "-jar", str(ROOT / module / "target" / jar)],
+        process = subprocess.Popen(["java", "-Xms64m", "-Xmx384m", "-jar", str(ROOT / module / "target" / jar)],
                                    cwd=logs, env=env, stdout=output, stderr=subprocess.STDOUT)
         processes.append(process)
         return process
@@ -119,11 +121,12 @@ def main():
         # Prevent a developer's shell configuration from selecting real databases,
         # external config files or JVM-injected properties.
         env = {key: value for key, value in os.environ.items()
-               if not key.startswith(("SPRING_", "HRMS_", "EMPLOYEE_", "LEAVE_", "MONGODB_", "REDIS_", "RECRUITMENT_", "KAFKA_", "APP_"))
+               if not key.startswith(("SPRING_", "HRMS_", "EMPLOYEE_", "LEAVE_", "MONGODB_", "REDIS_", "RECRUITMENT_", "KAFKA_", "APP_", "PAYROLL_"))
                and key not in {"JWT_SECRET", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "SERVER_PORT"}}
         env.update(HRMS_JWT_SECRET_BASE64=base64.b64encode(secrets.token_bytes(48)).decode(),
                    HRMS_JWT_ISSUER="hrms-employee-service", HRMS_JWT_AUDIENCE="hrms-leave-service",
                    HRMS_RECRUITMENT_JWT_AUDIENCE="hrms-recruitment-service",
+                   HRMS_PAYROLL_JWT_AUDIENCE="hrms-payroll-service",
                    EMPLOYEE_SERVICE_INTERNAL_TOKEN=internal, REDIS_HOST="127.0.0.1", REDIS_PORT=str(redis_port),
                    EMPLOYEE_SERVICE_PORT=str(employee_port), LEAVE_SERVICE_PORT=str(leave_port),
                    EMPLOYEE_SERVICE_URL=employee_base, EMPLOYEE_DIRECTORY_PATH="/api/internal/employees",
@@ -146,6 +149,31 @@ def main():
                 RECRUITMENT_KAFKA_GROUP='hrms-integration-notifications')
             recruitment_process=start('recruitment-service','recruitment-service-1.0.0.jar',recruitment_env)
             ready(recruitment_base,'/actuator/health',recruitment_process)
+
+        payroll_base=None
+        payroll_bases=[]
+        if options.with_payroll:
+            payroll_processes=[]
+            for number in range(3):
+                port=free_port()
+                payroll_bases.append(f'http://127.0.0.1:{port}')
+                payroll_env=dict(env,PAYROLL_SERVICE_PORT=str(port),
+                    PAYROLL_MONGODB_URI=f'mongodb://127.0.0.1:{mongo_port}/hrms_payroll_integration',LEAVE_SERVICE_URL=leave_base)
+                payroll_processes.append(start('payroll-service','payroll-service-0.1.0-SNAPSHOT.jar',payroll_env,f'payroll-{number+1}'))
+            for base,process in zip(payroll_bases,payroll_processes):
+                ready(base,'/actuator/health',process)
+            proxy_port=free_port()
+            nginx=(ROOT/'infrastructure/nginx-payroll.conf').read_text()
+            for number,base in enumerate(payroll_bases,1):
+                nginx=nginx.replace(f'payroll{number}:8081',base.removeprefix('http://'))
+            nginx="log_format integration '$upstream_addr';\naccess_log /var/log/nginx/access.log integration;\n"+nginx.replace('listen 80;',f'listen {proxy_port};')
+            config=logs/'nginx.conf'
+            config.write_text(nginx)
+            proxy_name='hrms-integration-'+uuid.uuid4().hex[:12]
+            docker('run','--rm','-d','--name',proxy_name,'--network','host','-v',f'{config}:/etc/nginx/conf.d/default.conf:ro','nginx:1.27-alpine')
+            containers.append(proxy_name)
+            payroll_base=f'http://127.0.0.1:{proxy_port}'
+            ready(payroll_base,'/api/payroll/health',payroll_processes[0])
 
         def login(email):
             return request(employee_base, "/api/auth/login", data={"email": email, "password": password}, method="POST")["token"]
@@ -220,9 +248,12 @@ def main():
         check(True, "deactivated employee cannot submit even after a profile was cached")
         request(employee_base, settings, admin, {"active": True}, "PUT")
 
-        if recruitment_base:
-            hr=register('Recruitment HR','hr@example.test','HR')
+        if recruitment_base or payroll_base:
+            hr=register('HR Reviewer','hr@example.test','HR')
             hr_token=login(hr['email'])
+            hr_settings='/api/internal/employees/'+hr['employeeId']+'/leave-settings'
+
+        if recruitment_base:
             job_body={'title':'Java Engineer','company':'Integration Company','location':'India','description':'Integration job'}
             request(recruitment_base,'/api/jobs',data=job_body,method='POST',expected=401)
             request(recruitment_base,'/api/jobs',employee_token,job_body,'POST',403)
@@ -286,11 +317,82 @@ def main():
             check(len(request(recruitment_base,'/api/jobs'))==1,'deactivated HR loses staff access immediately while public job browsing remains available')
             request(employee_base,hr_settings,admin,{'active':True},'PUT')
 
+        if payroll_base:
+            pay={'employeeId':employee_id,'year':year,'month':day.month,'basicSalary':30000,'allowances':5000,'deductions':2000}
+            request(payroll_base,'/api/payroll/calculate',data=pay,method='POST',expected=401)
+            request(payroll_base,'/api/payroll/calculate',employee_token,pay,'POST',403)
+            request(payroll_base,'/api/payroll',manager_token,pay,'POST',403)
+            request(payroll_base,'/api/payroll',internal,pay,'POST',401)
+            check(True,'Payroll generation and calculation require a real HR/Admin login')
+            calculation=request(payroll_base,'/api/payroll/calculate',hr_token,pay,'POST')
+            check(calculation['grossSalary']==35000 and calculation['netSalary']==33000,'Payroll preserves the teammate salary formula and HR-entered deductions')
+            check(request(payroll_base,'/api/payroll/employee/'+employee_id,employee_token)==[],'calculation preview does not save payroll records')
+            invalid=dict(pay,employeeId='UNKNOWN')
+            request(payroll_base,'/api/payroll',hr_token,invalid,'POST',404)
+            request(payroll_base,'/api/payroll/calculate',hr_token,dict(pay,deductions=40000),'POST',400)
+            request(payroll_base,'/api/payroll/calculate',hr_token,dict(pay,month=13),'POST',400)
+            request(payroll_base,'/api/payroll/calculate',hr_token,dict(pay,basicSalary=-1),'POST',400)
+            check(True,'Payroll validates real employees, periods and salary amounts')
+            payslip=request(payroll_base,'/api/payroll',hr_token,pay,'POST',201)
+            path='/api/payroll/'+urllib.parse.quote(payslip['id'],safe='')
+            check(request(payroll_base,path,employee_token)['netSalary']==33000,'employee can read their own stored payslip')
+            request(payroll_base,path,outsider_token,expected=403)
+            request(payroll_base,'/api/payroll/employee/'+employee_id,manager_token,expected=403)
+            request(payroll_base,'/api/payroll/employee/'+employee_id+'/year/'+str(year)+'/month/'+str(day.month),outsider_token,expected=403)
+            check(True,'other employees and managers cannot read private payroll by record, employee or period')
+            check(request(payroll_base,path,admin)['id']==payslip['id'],'Admin can inspect payroll records')
+            request(payroll_base,'/api/payroll',hr_token,pay,'POST',409)
+            check(request(payroll_base,'/api/payroll/employee/'+employee_id,employee_token)[0]['id']==payslip['id'],'duplicate monthly creation cannot overwrite an existing payslip')
+            next_period=(day.replace(day=28)+dt.timedelta(days=4)).replace(day=1)
+            concurrent_pay=dict(pay,year=next_period.year,month=next_period.month)
+            def competing_create(number):
+                try:
+                    result=request(payroll_bases[number%3],'/api/payroll',hr_token,concurrent_pay,'POST',201)
+                    return 201,result['id']
+                except AssertionError as error:
+                    if 'received 409;' in str(error):return 409,None
+                    raise
+            with ThreadPoolExecutor(max_workers=12) as executor:
+                results=list(executor.map(competing_create,range(12)))
+            check(sum(code==201 for code,_ in results)==1 and sum(code==409 for code,_ in results)==11,'twelve concurrent requests across three Payroll instances create exactly one monthly record')
+            with ThreadPoolExecutor(max_workers=12) as executor:
+                calculations=list(executor.map(lambda _:request(payroll_base,'/api/payroll/calculate',hr_token,pay,'POST'),range(24)))
+            check(all(item['netSalary']==33000 for item in calculations),'concurrent calculations work through the Nginx load balancer')
+            proxy_log=docker('logs',proxy_name)
+            check(all(base.removeprefix('http://') in proxy_log for base in payroll_bases),'Nginx actually routes requests to all three Payroll instances')
+
+            period_end=next_period-dt.timedelta(days=1)
+            unpaid_body={'type':'UNPAID','startDate':period_end.isoformat(),'endDate':next_period.isoformat(),'reason':'Payroll period allocation check'}
+            unpaid=request(leave_base,'/api/leaves',employee_token,unpaid_body,'POST',201)
+            request(leave_base,f"/api/leaves/{employee_id}/{unpaid['id']}/decision",manager_token,{'approve':True},'PUT')
+            summary_path=f'/api/payroll/employee/{employee_id}/leave-summary?year={year}&month={day.month}'
+            summary=request(payroll_base,summary_path,hr_token)
+            check(summary['leaveReport']['unpaidDays']==1 and summary['deductionsAppliedAutomatically'] is False,'Payroll reads a real approved Leave report clipped to the payroll month without applying deductions')
+            check(request(payroll_base,summary_path,employee_token)['leaveReport']['unpaidDays']==1,'employee can see their own monthly leave context')
+            request(payroll_base,summary_path,outsider_token,expected=403)
+            check(request(payroll_base,path,employee_token)['netSalary']==33000,'approved unpaid leave does not change the saved salary when HR controls deductions')
+            request(employee_base,settings,admin,{'active':False},'PUT')
+            request(payroll_base,path,employee_token,expected=403)
+            request(payroll_base,'/api/payroll',hr_token,dict(pay,month=1 if day.month!=1 else 2),'POST',403)
+            request(employee_base,settings,admin,{'active':True},'PUT')
+            request(employee_base,hr_settings,admin,{'active':False},'PUT')
+            request(payroll_base,'/api/payroll/calculate',hr_token,pay,'POST',403)
+            request(employee_base,hr_settings,admin,{'active':True},'PUT')
+            check(True,'inactive employees and HR lose Payroll access immediately')
+            leave_process.terminate();leave_process.wait(timeout=20)
+            request(payroll_base,summary_path,hr_token,expected=503)
+            check(request(payroll_base,path,employee_token)['netSalary']==33000,'Leave outage blocks leave summaries while existing payslips remain available')
+
         employee_process.terminate()
         employee_process.wait(timeout=20)
         time.sleep(1)
-        request(leave_base, "/api/leaves", employee_token, body, "POST", 503)
-        check(len(request(leave_base, "/api/leaves/me", employee_token)) == 1, "Employee outage blocks writes while durable leave history stays readable")
+        if not payroll_base:
+            request(leave_base, "/api/leaves", employee_token, body, "POST", 503)
+            check(len(request(leave_base, "/api/leaves/me", employee_token)) == 1, "Employee outage blocks writes while durable leave history stays readable")
+        if payroll_base:
+            request(payroll_base,'/api/payroll/calculate',hr_token,pay,'POST',503)
+            request(payroll_base,path,employee_token,expected=503)
+            check(request(payroll_base,'/api/payroll/health')['status']=='UP','Payroll blocks private operations during Employee outage while public health remains available')
         if recruitment_base:
             request(recruitment_base,'/api/jobs',hr_token,job_body,'POST',503)
             request(recruitment_base,'/api/notifications',hr_token,expected=503)

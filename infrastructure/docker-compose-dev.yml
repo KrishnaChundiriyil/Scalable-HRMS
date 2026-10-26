@@ -106,6 +106,25 @@ services:
       RECRUITMENT_KAFKA_GROUP: ${RECRUITMENT_KAFKA_GROUP:-hrms-notification-group}
     volumes:
       - hrms_resumes:/app/resume-storage
+  payroll-service:
+    profiles: ["payroll"]
+    build:
+      context: ../payroll-service
+    ports:
+      - "127.0.0.1:8083:8083"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PAYROLL_MONGODB_URI: mongodb://mongodb:27017/hrms_payroll
+      HRMS_JWT_SECRET_BASE64: ${HRMS_JWT_SECRET_BASE64:-}
+      HRMS_JWT_ISSUER: ${HRMS_JWT_ISSUER:-hrms-employee-service}
+      HRMS_PAYROLL_JWT_AUDIENCE: ${HRMS_PAYROLL_JWT_AUDIENCE:-hrms-payroll-service}
+      HRMS_JWT_JWK_SET_URI: ${HRMS_JWT_JWK_SET_URI:-}
+      EMPLOYEE_SERVICE_URL: ${DOCKER_EMPLOYEE_SERVICE_URL:-http://host.docker.internal:8080}
+      LEAVE_SERVICE_URL: ${DOCKER_LEAVE_SERVICE_URL:-http://host.docker.internal:8081}
 volumes:
   hrms_mongodb:
   hrms_redis:

@@ -5,6 +5,8 @@ on:
       - 'leave-service/**'
       - 'person1-employee-service/**'
       - 'recruitment-service/**'
+      - 'payroll-service/**'
+      - 'jmeter/**'
       - 'infrastructure/**'
       - 'scripts/verify_real_integration.py'
       - '.github/workflows/leave-service-test.yml'
@@ -13,6 +15,8 @@ on:
       - 'leave-service/**'
       - 'person1-employee-service/**'
       - 'recruitment-service/**'
+      - 'payroll-service/**'
+      - 'jmeter/**'
       - 'infrastructure/**'
       - 'scripts/verify_real_integration.py'
       - '.github/workflows/leave-service-test.yml'
@@ -23,7 +27,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate combined service configuration
-        run: docker compose --env-file .env.example -f infrastructure/docker-compose-dev.yml --profile recruitment config --quiet
+        run: |
+          docker compose --env-file .env.example -f infrastructure/docker-compose-dev.yml --profile recruitment --profile payroll config --quiet
+          docker compose --env-file .env.example -f infrastructure/docker-compose-payroll.yml config --quiet
+          docker compose -f infrastructure/docker-compose-sharded.yml config --quiet
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -33,6 +40,7 @@ jobs:
             leave-service/pom.xml
             person1-employee-service/pom.xml
             recruitment-service/pom.xml
+            payroll-service/pom.xml
       - name: Verify unit and MongoDB/Redis integration tests
         working-directory: leave-service
         run: mvn -B --no-transfer-progress clean verify
@@ -42,5 +50,8 @@ jobs:
       - name: Verify Recruitment module
         working-directory: recruitment-service
         run: mvn -B --no-transfer-progress clean verify
-      - name: Verify Employee, Leave and Recruitment with real Kafka
-        run: python3 scripts/verify_real_integration.py --with-recruitment
+      - name: Verify Payroll module
+        working-directory: payroll-service
+        run: mvn -B --no-transfer-progress clean verify
+      - name: Verify all four services with Kafka and load-balanced Payroll
+        run: python3 scripts/verify_real_integration.py --with-recruitment --with-payroll

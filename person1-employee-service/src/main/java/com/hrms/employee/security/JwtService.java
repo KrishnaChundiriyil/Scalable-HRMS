@@ -14,10 +14,11 @@ public class JwtService {
  @Value("${app.jwt.issuer}") private String issuer;
  @Value("${app.jwt.audience}") private String audience;
  @Value("${app.jwt.recruitment-audience:hrms-recruitment-service}") private String recruitmentAudience;
+ @Value("${app.jwt.payroll-audience:hrms-payroll-service}") private String payrollAudience;
  @jakarta.annotation.PostConstruct void validateKey(){key();}
  @Value("${app.jwt.expiration-ms}") private long expirationMs;
  private SecretKey key(){return Keys.hmacShaKeyFor(base64Secret.isBlank()?secret.getBytes(StandardCharsets.UTF_8):java.util.Base64.getDecoder().decode(base64Secret));}
- public String generate(String employeeId,String email,String role){long now=System.currentTimeMillis();return Jwts.builder().subject(employeeId).claim("email",email).claim("role",role).claim("roles",java.util.List.of(role)).issuer(issuer).audience().add(audience).add(recruitmentAudience).and().issuedAt(new Date(now)).expiration(new Date(now+expirationMs)).signWith(key(),Jwts.SIG.HS256).compact();}
+ public String generate(String employeeId,String email,String role){long now=System.currentTimeMillis();return Jwts.builder().subject(employeeId).claim("email",email).claim("role",role).claim("roles",java.util.List.of(role)).issuer(issuer).audience().add(audience).add(recruitmentAudience).add(payrollAudience).and().issuedAt(new Date(now)).expiration(new Date(now+expirationMs)).signWith(key(),Jwts.SIG.HS256).compact();}
  public Claims parse(String token){return Jwts.parser().verifyWith(key()).requireIssuer(issuer).requireAudience(audience).build().parseSignedClaims(token).getPayload();}
  public long getExpirationSeconds(){return expirationMs/1000;}
 }

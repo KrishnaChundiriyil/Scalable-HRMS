@@ -1,0 +1,63 @@
+# Educational local MongoDB sharding lab. Keep separate from docker-compose-dev.yml.
+# This is a local demo, not production-hardened.
+services:
+  configsvr:
+    image: mongo:7.0
+    command: ["mongod", "--configsvr", "--replSet", "configRS", "--port", "27019", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27019:27019"
+    volumes:
+      - configsvr_data:/data/configdb
+
+  shard1:
+    image: mongo:7.0
+    command: ["mongod", "--shardsvr", "--replSet", "shard1RS", "--port", "27018", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27118:27018"
+    volumes:
+      - shard1_data:/data/db
+
+  shard2:
+    image: mongo:7.0
+    command: ["mongod", "--shardsvr", "--replSet", "shard2RS", "--port", "27018", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27128:27018"
+    volumes:
+      - shard2_data:/data/db
+
+  replica-init:
+    image: mongo:7.0
+    depends_on:
+      - configsvr
+      - shard1
+      - shard2
+    entrypoint: ["/bin/bash", "-lc"]
+    command: >
+      "sleep 8;
+      mongosh --host configsvr:27019 --eval 'try { rs.initiate({_id:\"configRS\",configsvr:true,members:[{_id:0,host:\"configsvr:27019\"}]}) } catch(e) { print(e) }';
+      mongosh --host shard1:27018 --eval 'try { rs.initiate({_id:\"shard1RS\",members:[{_id:0,host:\"shard1:27018\"}]}) } catch(e) { print(e) }';
+      mongosh --host shard2:27018 --eval 'try { rs.initiate({_id:\"shard2RS\",members:[{_id:0,host:\"shard2:27018\"}]}) } catch(e) { print(e) }';
+      sleep 12"
+
+  mongos:
+    image: mongo:7.0
+    command: ["mongos", "--configdb", "configRS/configsvr:27019", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "127.0.0.1:27020:27017"
+    depends_on:
+      replica-init:
+        condition: service_completed_successfully
+
+  shard-register:
+    image: mongo:7.0
+    depends_on:
+      - mongos
+    entrypoint: ["/bin/bash", "-lc"]
+    command: >
+      "sleep 8;
+      mongosh --host mongos:27017 --eval 'sh.addShard(\"shard1RS/shard1:27018\"); sh.addShard(\"shard2RS/shard2:27018\"); sh.enableSharding(\"hrms_payroll\"); db.getSiblingDB(\"hrms_payroll\").payroll_records.createIndex({employeeId:\"hashed\"}); sh.shardCollection(\"hrms_payroll.payroll_records\", {employeeId:\"hashed\"}); sh.status()'"
+
+volumes:
+  configsvr_data:
+  shard1_data:
+  shard2_data:
