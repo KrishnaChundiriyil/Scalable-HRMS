@@ -1,0 +1,52 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - hrms_mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ping:1}).ok"]
+      interval: 10s
+      timeout: 6s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - hrms_redis:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  leave-service:
+    profiles: ["app"]
+    build:
+      context: ..
+      dockerfile: leave-service/Dockerfile
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://mongodb:27017/hrms_leave
+      SPRING_DATA_REDIS_HOST: redis
+      HRMS_JWT_SECRET_BASE64: ${HRMS_JWT_SECRET_BASE64:-}
+      HRMS_JWT_ISSUER: ${HRMS_JWT_ISSUER:-hrms-employee-service}
+      HRMS_JWT_AUDIENCE: ${HRMS_JWT_AUDIENCE:-hrms-leave-service}
+      HRMS_JWT_JWK_SET_URI: ${HRMS_JWT_JWK_SET_URI:-}
+      EMPLOYEE_SERVICE_URL: ${DOCKER_EMPLOYEE_SERVICE_URL:-http://host.docker.internal:8082}
+      LEAVE_HOLIDAYS: ${LEAVE_HOLIDAYS:-}
+volumes:
+  hrms_mongodb:
+  hrms_redis:
