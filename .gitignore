@@ -1,0 +1,13 @@
+**/target/
+**/.idea/
+**/*.iml
+**/.classpath
+**/.project
+**/.settings/
+.env
+.env.*
+!.env.example
+*.log
+.pytest_cache/
+__pycache__/
+.DS_Store
