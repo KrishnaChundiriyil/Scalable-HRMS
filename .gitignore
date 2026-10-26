@@ -1,3 +1,9 @@
+<<<<<<< HEAD
+﻿.idea/
+target/
+.env
+*.iml
+=======
 **/target/
 **/.idea/
 **/*.iml
@@ -11,3 +17,4 @@
 .pytest_cache/
 __pycache__/
 .DS_Store
+>>>>>>> 54c444c76d01e87b00772968e0972d55e6cf5a5a
