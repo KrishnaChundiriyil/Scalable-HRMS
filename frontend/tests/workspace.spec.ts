@@ -131,7 +131,8 @@ test('a real SSE approval immediately opens a popup and retains the Inbox item',
     const response = await fetch('/api/leaves', { method: 'POST', headers: { Authorization: 'Bearer ' + session.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'CASUAL', startDate: date, endDate: date, reason: 'Live approval popup verification' }) });
     if (!response.ok) throw new Error(await response.text()); return response.json();
   }, { date });
-  await page.goto('/notifications');
+  const inboxStream = page.waitForResponse(response => response.url().includes('/notifications/stream') && response.status() === 200);
+  await page.goto('/notifications'); await inboxStream;
   const context = await browser.newContext({ baseURL: process.env.ALDER_E2E_BASE_URL || 'http://127.0.0.1:5173', reducedMotion: 'reduce' });
   try {
     const manager = await context.newPage(); await login(manager, 'manager@example.test');
@@ -141,6 +142,7 @@ test('a real SSE approval immediately opens a popup and retains the Inbox item',
     await manager.getByRole('dialog').getByRole('button', { name: 'Confirm approval' }).click();
     const popup = page.getByRole('dialog', { name: 'Your leave is approved' });
     await expect(popup).toBeVisible({ timeout: 12000 });
+    expect((await popup.boundingBox())!.height).toBeLessThan(600);
     await page.screenshot({ path: resolve('../.runtime/alder-approval-popup.png'), fullPage: false });
     await expect(popup.getByText('This update is saved in your Inbox, so you can return to it later.')).toBeVisible();
     await popup.getByRole('button', { name: 'Got it' }).click(); await expect(popup).not.toBeVisible();
