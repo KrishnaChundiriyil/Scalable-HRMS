@@ -453,8 +453,8 @@ def main():
             check(True,'Payroll and Recruitment successful actions appear in the authenticated actor feed')
             check(request(payroll_base,'/api/payroll/me/activity',employee_token)==[], 'creating payroll does not expose the HR activity feed to employees')
             check(request(recruitment_base,'/api/recruitment-activity/me',employee_token)==[], 'employee feed cannot expose candidate or HR recruitment actions')
-            for base,path in [(employee_base,'/api/employee-activity/me'),(leave_base,'/api/leaves/me/activity'),(payroll_base,'/api/payroll/me/activity'),(recruitment_base,'/api/recruitment-activity/me')]:
-                request(base,path,expected=403 if base==employee_base else 401)
+            for activity_base,activity_path in [(employee_base,'/api/employee-activity/me'),(leave_base,'/api/leaves/me/activity'),(payroll_base,'/api/payroll/me/activity'),(recruitment_base,'/api/recruitment-activity/me')]:
+                request(activity_base,activity_path,expected=403 if activity_base==employee_base else 401)
             request(leave_base,'/api/leaves/me/activity',candidate_token,expected=403)
             request(payroll_base,'/api/payroll/me/activity',candidate_token,expected=403)
             check(True,'activity endpoints require authentication and preserve candidate/staff boundaries')
