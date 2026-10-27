@@ -38,7 +38,8 @@ public class LeaveController {
             @RequestHeader("Authorization") String bearer,
             @RequestHeader(value="Idempotency-Key", required=false) String key,
             @Valid @RequestBody CreateLeaveRequest input) {
-        access.active(jwt, bearer);
+        var employee = directory.requireActive(jwt.getSubject(), bearer);
+        if(employee.emailOnlyLeave()) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,"This position requests leave by email to " + employee.leaveRequestEmail());
         return ResponseEntity.status(HttpStatus.CREATED).body(leaves.submit(jwt.getSubject(), input, key));
     }
     @GetMapping("/me")

@@ -8,6 +8,9 @@ import java.time.Instant;
 public class JobApplication {
     @Id private String id;
     private String jobId;
+    private String applicantAccountId;
+    public String getApplicantAccountId(){return applicantAccountId;}
+    public void setApplicantAccountId(String value){applicantAccountId=value;}
     private String candidateId;
     private String candidateName;
     private String resumeFileName;

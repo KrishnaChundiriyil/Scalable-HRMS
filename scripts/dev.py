@@ -72,6 +72,12 @@ def main():
         return not artifact.exists() or any(path.stat().st_mtime > artifact.stat().st_mtime for path in (ROOT / 'backend' / module / 'src/main').rglob('*') if path.is_file())
     if any(stale(module, jar) for module, jar, *_ in SERVICES.values()):
         subprocess.run(['mvn', '-B', '--no-transfer-progress', '-DskipTests', 'package'], cwd=ROOT, check=True)
+    legacy = ROOT / 'backend/employee-service/data/hrmsdb.mv.db'
+    if legacy.exists():
+        backup = STATE / 'backups/hrmsdb-before-mongo.mv.db'
+        backup.parent.mkdir(mode=0o700,exist_ok=True)
+        if not backup.exists():shutil.copy2(legacy,backup)
+        env['EMPLOYEE_IMPORT_LEGACY_H2']='true'
     urls = {}
     for name, (_, _, key, default, _) in SERVICES.items():
         if name in state and owned(state[name]):

@@ -1,7 +1,7 @@
-export type Role = 'EMPLOYEE' | 'MANAGER' | 'HR' | 'ADMIN';
-export interface Employee { employeeId: string; name: string; email: string; department: string; role: Role; jobTitle: string; phone: string; }
+export type Role = 'EMPLOYEE' | 'MANAGER' | 'HR' | 'ADMIN' | 'CANDIDATE';
+export interface Employee { employeeId: string; name: string; email: string; department: string; role: Role; jobTitle: string; phone: string; emailOnlyLeave?: boolean; leaveRequestEmail?: string; }
 export interface Session { token: string; employee: Employee; }
-export interface EmployeeSettings { employeeId: string; name: string; department: string; managerId: string | null; active: boolean; }
+export interface EmployeeSettings { employeeId: string; name: string; department: string; managerId: string | null; active: boolean; emailOnlyLeave: boolean; leaveRequestEmail: string; role: Role; }
 export interface Page<T> { items: T[]; page: number; size: number; totalElements: number; totalPages: number; }
 export type LeaveStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 export interface Leave { id: string; employeeId: string; type: string; startDate: string; endDate: string; days: number; paid: boolean; reason: string; status: LeaveStatus; createdAt: string; decidedAt: string | null; reviewedBy: string | null; rejectionReason: string | null; cancellationReason: string | null; eligibilityNote: string | null; session: 'FULL_DAY' | 'MORNING' | 'AFTERNOON'; }

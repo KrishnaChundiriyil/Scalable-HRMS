@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
   const payroll = target('payroll', env.PAYROLL_SERVICE_PORT || '8183');
   const recruitment = target('recruitment', env.RECRUITMENT_SERVICE_PORT || '8184');
   const proxy = Object.fromEntries([
-    ['/api/auth', employee], ['/api/employees', employee], ['/api/internal/employees', employee],
+    ['/api/auth', employee], ['/api/company', employee], ['/api/employees', employee], ['/api/internal/employees', employee],
     ['/api/leaves', leave], ['/api/payroll', payroll],
     ...['jobs', 'candidates', 'applications', 'shorten', 'crawler', 'notifications', 'storage'].map(route => [`/api/${route}`, recruitment]),
     ['/s/', recruitment], ['/demo-jobs', recruitment],

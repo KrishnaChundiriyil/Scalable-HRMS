@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import signal
 import socket
 import subprocess
 import tempfile
@@ -88,6 +89,23 @@ def main():
         processes.append(process)
         return process
 
+    def stop(process):
+        # Outage checks must stop even when a browser left a long-lived SSE stream.
+        # Only processes/groups created by this verifier are signalled.
+        group=getattr(process,'hrms_group',False)
+        try:
+            if group:os.killpg(process.pid,signal.SIGTERM)
+            elif process.poll() is None:process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            if group:os.killpg(process.pid,signal.SIGKILL)
+            else:process.kill()
+            process.wait(timeout=10)
+        except ProcessLookupError:pass
+        if group:
+            try:os.killpg(process.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+
     def request(base, path, token=None, data=None, method="GET", expected=200,content_type="application/json"):
         headers = {"Content-Type": content_type}
         if token:
@@ -134,7 +152,7 @@ def main():
                    EMPLOYEE_SERVICE_INTERNAL_TOKEN=internal, REDIS_HOST="127.0.0.1", REDIS_PORT=str(redis_port),
                    EMPLOYEE_SERVICE_PORT=str(employee_port), LEAVE_SERVICE_PORT=str(leave_port),
                    EMPLOYEE_SERVICE_URL=employee_base, EMPLOYEE_DIRECTORY_PATH="/api/internal/employees",
-                   EMPLOYEE_DATABASE_URL="jdbc:h2:mem:integration;DB_CLOSE_DELAY=-1", EMPLOYEE_DATABASE_USERNAME="sa",
+                   EMPLOYEE_MONGODB_URI=f"mongodb://127.0.0.1:{mongo_port}/hrms_employee_integration", EMPLOYEE_DATABASE_USERNAME="sa",
                    EMPLOYEE_DATABASE_PASSWORD="", HRMS_BOOTSTRAP_ADMIN_ENABLED="true",
                    HRMS_ADMIN_EMAIL="admin@example.test", HRMS_ADMIN_PASSWORD=password,
                    MONGODB_URI=f"mongodb://127.0.0.1:{mongo_port}/hrms_integration", LEAVE_HOLIDAYS="",
@@ -201,6 +219,13 @@ def main():
         outsider = register("Other Manager", "other@example.test", "MANAGER")
         employee = register("Integration Employee", "employee@example.test", "ADMIN", False)
         check(employee["role"] == "EMPLOYEE", "public registration cannot grant privileged roles")
+        candidate_account=request(employee_base,"/api/auth/candidate-register",data={"name":"Test Candidate","email":"applicant@example.test","password":password,"department":"Applicants","jobTitle":"Designer","role":"ADMIN"},method="POST",expected=201)
+        candidate_token=login(candidate_account["email"])
+        check(candidate_account["role"]=="CANDIDATE","candidate registration cannot grant employee or administrator access")
+        request(employee_base,"/api/employees",candidate_token,expected=403)
+        request(leave_base,"/api/leaves/me/balance",candidate_token,expected=403)
+        if payroll_base:request(payroll_base,"/api/payroll/employee/"+candidate_account['employeeId'],candidate_token,expected=403)
+        check(True,"job seeker cannot access staff directory, leave or payroll APIs")
         employee_id, manager_id = employee["employeeId"], manager["employeeId"]
         employee_token, manager_token, outsider_token = login(employee["email"]), login(manager["email"]), login(outsider["email"])
         claims = json.loads(base64.urlsafe_b64decode(employee_token.split(".")[1] + "=="))
@@ -213,6 +238,10 @@ def main():
         request(employee_base, settings, internal, {"active": False}, "PUT", (401, 403))
         request(employee_base, "/api/employees", internal, expected=(401, 403))
         check(request(employee_base, f"/api/internal/employees/{employee_id}", internal)["managerId"] == manager_id, "internal credential permits directory reads but cannot mutate or use public APIs")
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            parallel=list(pool.map(lambda i:register("Concurrent Staff "+str(i),f"concurrent{i}@example.test","EMPLOYEE"),range(6)))
+        check(len({item['employeeId'] for item in parallel})==6,"MongoDB sequence allocates unique employee IDs during concurrent registration")
 
         day = dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30))).date() + dt.timedelta(days=10)
         while day.weekday() > 4:
@@ -327,6 +356,12 @@ def main():
             check(len(request(recruitment_base,'/api/jobs'))==1,'deactivated HR loses staff access immediately while public job browsing remains available')
             request(employee_base,hr_settings,admin,{'active':True},'PUT')
 
+            own_application=request(recruitment_base,'/api/applications',candidate_token,data=b''.join(parts),method='POST',content_type='multipart/form-data; boundary='+boundary)
+            check([item['id'] for item in request(recruitment_base,'/api/applications/me',candidate_token)]==[own_application['id']],'candidate application history is linked to authenticated account, not an email supplied by a public form')
+            check(request(recruitment_base,'/api/applications/me',employee_token)==[],'other users cannot see a candidate application history')
+            request(recruitment_base,'/api/applications',candidate_token,expected=403)
+            request(recruitment_base,'/api/applications/'+application['id']+'/resume',candidate_token,expected=403)
+
         if payroll_base:
             pay={'employeeId':employee_id,'year':year,'month':day.month,'basicSalary':30000,'allowances':5000,'deductions':2000}
             request(payroll_base,'/api/payroll/calculate',data=pay,method='POST',expected=401)
@@ -389,6 +424,11 @@ def main():
             request(payroll_base,'/api/payroll/calculate',hr_token,pay,'POST',403)
             request(employee_base,hr_settings,admin,{'active':True},'PUT')
             check(True,'inactive employees and HR lose Payroll access immediately')
+            senior=register("Senior Leader","leader@example.test","MANAGER")
+            senior_token=login(senior['email'])
+            request(employee_base,'/api/internal/employees/'+senior['employeeId']+'/leave-settings',admin,{'emailOnlyLeave':True,'leaveRequestEmail':'leave@alder.example'},'PUT')
+            request(leave_base,'/api/leaves',senior_token,body,'POST',403)
+            check(request(leave_base,balance_path,senior_token)['annual']['remaining']==20,'most senior leader can view balances but must email HR instead of submitting for approval')
             if options.frontend:
                 ui_port=free_port()
                 targets=logs/'services.json'
@@ -398,7 +438,8 @@ def main():
                     ALDER_E2E_EMPLOYEE_ID=employee_id,ALDER_E2E_PAY_PERIOD=f'{year}-{day.month:02d}',
                     PLAYWRIGHT_BROWSERS_PATH=str(ROOT/'.runtime/browsers'))
                 output=(logs/'frontend.log').open('w');files.append(output)
-                ui_process=subprocess.Popen(['npm','run','preview'],cwd=ROOT/'frontend',env=ui_env,stdout=output,stderr=subprocess.STDOUT)
+                ui_process=subprocess.Popen(['npm','run','preview'],cwd=ROOT/'frontend',env=ui_env,stdout=output,stderr=subprocess.STDOUT,start_new_session=True)
+                ui_process.hrms_group=True
                 processes.append(ui_process)
                 deadline=time.monotonic()+45
                 while time.monotonic()<deadline:
@@ -409,12 +450,11 @@ def main():
                 else:raise RuntimeError('Frontend did not start')
                 subprocess.run(['npm','run','test:e2e'],cwd=ROOT/'frontend',env=ui_env,check=True)
                 check(True,'real browser workflows, role boundaries, mobile layout and accessibility pass')
-            leave_process.terminate();leave_process.wait(timeout=20)
+            stop(leave_process)
             request(payroll_base,summary_path,hr_token,expected=503)
             check(request(payroll_base,path,employee_token)['netSalary']==33000,'Leave outage blocks leave summaries while existing payslips remain available')
 
-        employee_process.terminate()
-        employee_process.wait(timeout=20)
+        stop(employee_process)
         time.sleep(1)
         if not payroll_base:
             request(leave_base, "/api/leaves", employee_token, body, "POST", 503)
@@ -426,17 +466,11 @@ def main():
         if recruitment_base:
             request(recruitment_base,'/api/jobs',hr_token,job_body,'POST',503)
             request(recruitment_base,'/api/notifications',hr_token,expected=503)
-            check(len(request(recruitment_base,'/api/jobs'))==1,'Recruitment blocks staff access during Employee outage and keeps public job browsing online')
+            check(any(item['id']==job['id'] for item in request(recruitment_base,'/api/jobs')),'Recruitment blocks staff access during Employee outage and keeps public job browsing online')
         print(f"\n{checks} integration checks passed. Logs: {logs}", flush=True)
     finally:
         for process in reversed(processes):
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=20)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=10)
+            if process.poll() is None or getattr(process,'hrms_group',False):stop(process)
         for output in files:
             output.close()
         for name in containers:

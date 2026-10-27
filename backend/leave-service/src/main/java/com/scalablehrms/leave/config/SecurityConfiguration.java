@@ -91,7 +91,7 @@ public class SecurityConfiguration {
                     .hasAnyRole("MANAGER", "HR", "ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/leaves/*/*/decision").hasAnyRole("MANAGER", "HR", "ADMIN")
                 .requestMatchers("/api/dev/**").authenticated()
-                .requestMatchers("/api/leaves", "/api/leaves/**").authenticated()
+                .requestMatchers("/api/leaves", "/api/leaves/**").hasAnyRole("EMPLOYEE", "MANAGER", "HR", "ADMIN")
                 .anyRequest().denyAll())
             .exceptionHandling(errors -> errors.authenticationEntryPoint(unauthenticated).accessDeniedHandler(forbidden))
             .oauth2ResourceServer(oauth -> oauth.authenticationEntryPoint(unauthenticated).accessDeniedHandler(forbidden)

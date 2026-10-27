@@ -44,7 +44,7 @@ public class ApplicationController {
     @PostMapping(value = "/applications", consumes = "multipart/form-data")
     public ResponseEntity<?> apply(@RequestParam String jobId, @RequestParam String name, @RequestParam String email,
                                    @RequestParam(required = false) String phone,
-                                   @RequestParam("resume") MultipartFile resume) throws Exception {
+                                   @RequestParam("resume") MultipartFile resume, @org.springframework.security.core.annotation.AuthenticationPrincipal org.springframework.security.oauth2.jwt.Jwt actor) throws Exception {
         Optional<Job> job = jobs.findById(jobId);
         if (job.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Unknown jobId"));
         if (resume.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Resume file is required"));
@@ -57,6 +57,7 @@ public class ApplicationController {
 
         JobApplication app = new JobApplication();
         app.setJobId(jobId);
+        if(actor!=null)app.setApplicantAccountId(actor.getSubject());
         app.setCandidateId(cand.getId());
         app.setCandidateName(name);
         app = apps.save(app);              // id needed first: it is the consistent-hash key
@@ -71,6 +72,11 @@ public class ApplicationController {
     @GetMapping("/applications")
     public List<JobApplication> list(@RequestParam(required = false) String jobId) {
         return jobId == null ? apps.findAll() : apps.findByJobId(jobId);
+    }
+
+    @GetMapping("/applications/me")
+    public List<Map<String,Object>> mine(@org.springframework.security.core.annotation.AuthenticationPrincipal org.springframework.security.oauth2.jwt.Jwt actor){
+        return apps.findByApplicantAccountId(actor.getSubject()).stream().map(app->{Map<String,Object> view=new LinkedHashMap<>();view.put("id",app.getId());view.put("jobId",app.getJobId());view.put("status",app.getStatus());view.put("appliedAt",app.getAppliedAt());view.put("resumeFileName",app.getResumeFileName());return view;}).toList();
     }
 
     @GetMapping("/applications/{id}/resume")

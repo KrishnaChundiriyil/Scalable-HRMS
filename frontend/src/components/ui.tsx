@@ -18,10 +18,10 @@ export function Empty({ title, detail, action, icon }: { title: string; detail?:
 export function Loading({ rows = 4 }: { rows?: number }) { return <div className="skeleton-list" role="status" aria-label="Loading information">{Array.from({ length: rows }, (_, index) => <span className="skeleton" key={index} />)}</div>; }
 export function PageHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: ReactNode }) { return <header className="page-heading"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1>{description && <p>{description}</p>}</div>{action && <div className="page-actions">{action}</div>}</header>; }
 export function CardHeader({ title, detail, action }: { title: string; detail?: string; action?: ReactNode }) { return <div className="card-heading"><div><h2>{title}</h2>{detail && <p>{detail}</p>}</div>{action}</div>; }
-export function Sheet({ open, onClose, title, subtitle, children, footer, wide = false, busy = false }: { open: boolean; onClose: () => void; title: string; subtitle?: string; children: ReactNode; footer?: ReactNode; wide?: boolean; busy?: boolean }) {
+export function Sheet({ open, onClose, title, subtitle, children, footer, wide = false, busy = false, centered = false }: { open: boolean; onClose: () => void; title: string; subtitle?: string; children: ReactNode; footer?: ReactNode; wide?: boolean; busy?: boolean; centered?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null); const titleId = useId();
   useEffect(() => { const node = dialog.current; if (!node) return; if (open && !node.open) node.showModal(); if (!open && node.open) node.close(); }, [open]);
-  return <dialog ref={dialog} className={`sheet ${wide ? 'wide' : ''}`} aria-labelledby={titleId} onKeyDown={event => {
+  return <dialog ref={dialog} className={`sheet ${wide ? 'wide' : ''} ${centered ? 'centered' : ''}`} aria-labelledby={titleId} onKeyDown={event => {
     if (event.key !== 'Tab') return;
     const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')].filter(node => node.getClientRects().length);
     const first = controls[0], last = controls[controls.length - 1];

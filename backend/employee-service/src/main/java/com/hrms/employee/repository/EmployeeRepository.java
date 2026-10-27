@@ -1,10 +1,10 @@
 package com.hrms.employee.repository;
 
 import com.hrms.employee.entity.Employee;
-import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.mongodb.repository.MongoRepository;
 import java.util.*;
 
-public interface EmployeeRepository extends JpaRepository<Employee, Long> {
+public interface EmployeeRepository extends MongoRepository<Employee, String> {
     List<Employee> findByManagerId(String managerId);
     Optional<Employee> findByEmailIgnoreCase(String email);
     Optional<Employee> findByEmployeeId(String employeeId);

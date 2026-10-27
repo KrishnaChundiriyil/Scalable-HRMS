@@ -24,5 +24,5 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export const useAuth = () => useContext(AuthContext);
 export function useRoles() {
   const { session } = useAuth(); const role = session?.employee.role;
-  return { hr: role === 'HR' || role === 'ADMIN', reviewer: role === 'MANAGER' || role === 'HR' || role === 'ADMIN', admin: role === 'ADMIN' };
+  return { candidate: role === 'CANDIDATE', hr: role === 'HR' || role === 'ADMIN', reviewer: role === 'MANAGER' || role === 'HR' || role === 'ADMIN', admin: role === 'ADMIN' };
 }

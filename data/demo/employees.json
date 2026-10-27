@@ -1,0 +1,405 @@
+{
+  "description": "40 fictional colleagues for local demonstration. This same MongoDB dataset powers the directory and Trie suggestions. No real personal data.",
+  "employees": [
+    {
+      "name": "Meera Nair",
+      "email": "meera.nair@demo.alder.example",
+      "department": "Leadership",
+      "jobTitle": "Chief Executive Officer",
+      "role": "MANAGER",
+      "managerEmail": null,
+      "emailOnlyLeave": true,
+      "phone": ""
+    },
+    {
+      "name": "Ananya Rao",
+      "email": "ananya.rao@demo.alder.example",
+      "department": "Engineering",
+      "jobTitle": "Engineering Manager",
+      "role": "MANAGER",
+      "managerEmail": "meera.nair@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Rohan Menon",
+      "email": "rohan.menon@demo.alder.example",
+      "department": "Engineering",
+      "jobTitle": "Software Engineer",
+      "role": "EMPLOYEE",
+      "managerEmail": "ananya.rao@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Kavya Iyer",
+      "email": "kavya.iyer@demo.alder.example",
+      "department": "People & Culture",
+      "jobTitle": "People Operations Lead",
+      "role": "ADMIN",
+      "managerEmail": "meera.nair@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Arjun Shah",
+      "email": "arjun.shah@demo.alder.example",
+      "department": "Product",
+      "jobTitle": "Product Manager",
+      "role": "MANAGER",
+      "managerEmail": "meera.nair@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Nisha Verma",
+      "email": "nisha.verma@demo.alder.example",
+      "department": "Design",
+      "jobTitle": "Design Manager",
+      "role": "MANAGER",
+      "managerEmail": "meera.nair@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Vikram Joshi",
+      "email": "vikram.joshi@demo.alder.example",
+      "department": "Finance",
+      "jobTitle": "Finance Manager",
+      "role": "MANAGER",
+      "managerEmail": "meera.nair@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Sara Thomas",
+      "email": "sara.thomas@demo.alder.example",
+      "department": "Operations",
+      "jobTitle": "Operations Manager",
+      "role": "MANAGER",
+      "managerEmail": "meera.nair@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Dev Malhotra",
+      "email": "dev.malhotra@demo.alder.example",
+      "department": "Data & Analytics",
+      "jobTitle": "Analytics Manager",
+      "role": "MANAGER",
+      "managerEmail": "meera.nair@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Priya Kapoor",
+      "email": "priya.kapoor@demo.alder.example",
+      "department": "People & Culture",
+      "jobTitle": "HR Partner",
+      "role": "HR",
+      "managerEmail": "meera.nair@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Aditi Sharma",
+      "email": "aditi.sharma@demo.alder.example",
+      "department": "Engineering",
+      "jobTitle": "Software Engineer",
+      "role": "EMPLOYEE",
+      "managerEmail": "ananya.rao@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Ishaan Mehta",
+      "email": "ishaan.mehta@demo.alder.example",
+      "department": "Product",
+      "jobTitle": "Product Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "arjun.shah@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Neha Das",
+      "email": "neha.das@demo.alder.example",
+      "department": "Design",
+      "jobTitle": "Product Designer",
+      "role": "EMPLOYEE",
+      "managerEmail": "nisha.verma@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Rahul Pillai",
+      "email": "rahul.pillai@demo.alder.example",
+      "department": "Finance",
+      "jobTitle": "Finance Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "vikram.joshi@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Pooja Reddy",
+      "email": "pooja.reddy@demo.alder.example",
+      "department": "Operations",
+      "jobTitle": "Operations Associate",
+      "role": "EMPLOYEE",
+      "managerEmail": "sara.thomas@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Kiran Bhat",
+      "email": "kiran.bhat@demo.alder.example",
+      "department": "Data & Analytics",
+      "jobTitle": "Data Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "dev.malhotra@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Sneha Kulkarni",
+      "email": "sneha.kulkarni@demo.alder.example",
+      "department": "Engineering",
+      "jobTitle": "Software Engineer",
+      "role": "EMPLOYEE",
+      "managerEmail": "ananya.rao@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Aditya Sen",
+      "email": "aditya.sen@demo.alder.example",
+      "department": "Product",
+      "jobTitle": "Product Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "arjun.shah@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Mira Fernandes",
+      "email": "mira.fernandes@demo.alder.example",
+      "department": "Design",
+      "jobTitle": "Product Designer",
+      "role": "EMPLOYEE",
+      "managerEmail": "nisha.verma@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Varun Gupta",
+      "email": "varun.gupta@demo.alder.example",
+      "department": "Finance",
+      "jobTitle": "Finance Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "vikram.joshi@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Tara Krishnan",
+      "email": "tara.krishnan@demo.alder.example",
+      "department": "Operations",
+      "jobTitle": "Operations Associate",
+      "role": "EMPLOYEE",
+      "managerEmail": "sara.thomas@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Sanjay Bose",
+      "email": "sanjay.bose@demo.alder.example",
+      "department": "Data & Analytics",
+      "jobTitle": "Data Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "dev.malhotra@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Leela Mathew",
+      "email": "leela.mathew@demo.alder.example",
+      "department": "Engineering",
+      "jobTitle": "Software Engineer",
+      "role": "EMPLOYEE",
+      "managerEmail": "ananya.rao@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Naveen Kumar",
+      "email": "naveen.kumar@demo.alder.example",
+      "department": "Product",
+      "jobTitle": "Product Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "arjun.shah@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Riya Sethi",
+      "email": "riya.sethi@demo.alder.example",
+      "department": "Design",
+      "jobTitle": "Product Designer",
+      "role": "EMPLOYEE",
+      "managerEmail": "nisha.verma@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Aman Khanna",
+      "email": "aman.khanna@demo.alder.example",
+      "department": "Finance",
+      "jobTitle": "Finance Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "vikram.joshi@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Diya Patel",
+      "email": "diya.patel@demo.alder.example",
+      "department": "Operations",
+      "jobTitle": "Operations Associate",
+      "role": "EMPLOYEE",
+      "managerEmail": "sara.thomas@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Harish Nambiar",
+      "email": "harish.nambiar@demo.alder.example",
+      "department": "Data & Analytics",
+      "jobTitle": "Data Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "dev.malhotra@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Anika Desai",
+      "email": "anika.desai@demo.alder.example",
+      "department": "Engineering",
+      "jobTitle": "Software Engineer",
+      "role": "EMPLOYEE",
+      "managerEmail": "ananya.rao@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Ritesh Saxena",
+      "email": "ritesh.saxena@demo.alder.example",
+      "department": "Product",
+      "jobTitle": "Product Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "arjun.shah@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Sana Ali",
+      "email": "sana.ali@demo.alder.example",
+      "department": "Design",
+      "jobTitle": "Product Designer",
+      "role": "EMPLOYEE",
+      "managerEmail": "nisha.verma@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Manav Jain",
+      "email": "manav.jain@demo.alder.example",
+      "department": "Finance",
+      "jobTitle": "Finance Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "vikram.joshi@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Ira Dutta",
+      "email": "ira.dutta@demo.alder.example",
+      "department": "Operations",
+      "jobTitle": "Operations Associate",
+      "role": "EMPLOYEE",
+      "managerEmail": "sara.thomas@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Siddharth Roy",
+      "email": "siddharth.roy@demo.alder.example",
+      "department": "Data & Analytics",
+      "jobTitle": "Data Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "dev.malhotra@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Asha George",
+      "email": "asha.george@demo.alder.example",
+      "department": "Engineering",
+      "jobTitle": "Software Engineer",
+      "role": "EMPLOYEE",
+      "managerEmail": "ananya.rao@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Dhruv Arora",
+      "email": "dhruv.arora@demo.alder.example",
+      "department": "Product",
+      "jobTitle": "Product Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "arjun.shah@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Rhea Chawla",
+      "email": "rhea.chawla@demo.alder.example",
+      "department": "Design",
+      "jobTitle": "Product Designer",
+      "role": "EMPLOYEE",
+      "managerEmail": "nisha.verma@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Nikhil Bansal",
+      "email": "nikhil.bansal@demo.alder.example",
+      "department": "Finance",
+      "jobTitle": "Finance Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "vikram.joshi@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Zoya Khan",
+      "email": "zoya.khan@demo.alder.example",
+      "department": "Operations",
+      "jobTitle": "Operations Associate",
+      "role": "EMPLOYEE",
+      "managerEmail": "sara.thomas@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    },
+    {
+      "name": "Abhinav Suri",
+      "email": "abhinav.suri@demo.alder.example",
+      "department": "Data & Analytics",
+      "jobTitle": "Data Analyst",
+      "role": "EMPLOYEE",
+      "managerEmail": "dev.malhotra@demo.alder.example",
+      "emailOnlyLeave": false,
+      "phone": ""
+    }
+  ]
+}

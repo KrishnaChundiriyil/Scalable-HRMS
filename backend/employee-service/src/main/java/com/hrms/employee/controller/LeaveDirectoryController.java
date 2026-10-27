@@ -15,10 +15,10 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/internal/employees")
 public class LeaveDirectoryController {
-    public record Summary(String employeeId,String name,String department,boolean active,String managerId) {
-        static Summary of(Employee employee){return new Summary(employee.getEmployeeId(),employee.getName(),employee.getDepartment(),employee.isActive(),employee.getManagerId());}
+    public record Summary(String employeeId,String name,String department,boolean active,String managerId,boolean emailOnlyLeave,String leaveRequestEmail,String role) {
+        static Summary of(Employee employee){return new Summary(employee.getEmployeeId(),employee.getName(),employee.getDepartment(),employee.isActive(),employee.getManagerId(),employee.isEmailOnlyLeave(),employee.getLeaveRequestEmail(),employee.getRole());}
     }
-    public record LeaveSettings(@Pattern(regexp="[A-Za-z0-9_.@-]{0,128}") String managerId,Boolean active) {}
+    public record LeaveSettings(@Pattern(regexp="[A-Za-z0-9_.@-]{0,128}") String managerId,Boolean active,Boolean emailOnlyLeave,@jakarta.validation.constraints.Email String leaveRequestEmail) { public LeaveSettings(String managerId,Boolean active){this(managerId,active,null,null);} }
     private final EmployeeRepository employees;
     private final EmployeeCacheService cache;
     public LeaveDirectoryController(EmployeeRepository employees,EmployeeCacheService cache){this.employees=employees;this.cache=cache;}
@@ -30,7 +30,7 @@ public class LeaveDirectoryController {
 
     @GetMapping("/{id}")
     public Summary get(@PathVariable String id,Authentication auth){
-        Employee target=employee(id); // Deliberately reads JPA, not the display-profile cache.
+        Employee target=employee(id); // Always read the authoritative store, not the display-profile cache.
         if(!service(auth)){
             Employee actor=activeActor(auth);
             boolean assigned="MANAGER".equals(actor.getRole())&&actor.getEmployeeId().equals(target.getManagerId());
@@ -50,7 +50,7 @@ public class LeaveDirectoryController {
     @PutMapping("/{id}/leave-settings")
     public Summary settings(@PathVariable String id,@Valid @RequestBody LeaveSettings settings,Authentication auth){
         if(service(auth)||!hr(activeActor(auth)))throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Only HR/Admin can assign manager or active status");
-        if(settings.managerId()==null&&settings.active()==null)throw new IllegalArgumentException("Supply managerId or active");
+        if(settings.managerId()==null&&settings.active()==null&&settings.emailOnlyLeave()==null&&settings.leaveRequestEmail()==null)throw new IllegalArgumentException("Supply at least one employment setting");
         Employee target=employee(id);
         if(settings.managerId()!=null){
             String manager=settings.managerId().isBlank()?null:settings.managerId();
@@ -66,6 +66,8 @@ public class LeaveDirectoryController {
             target.setManagerId(manager);
         }
         if(settings.active()!=null)target.setActive(settings.active());
+        if(settings.emailOnlyLeave()!=null)target.setEmailOnlyLeave(settings.emailOnlyLeave());
+        if(settings.leaveRequestEmail()!=null){if(settings.leaveRequestEmail().isBlank())throw new IllegalArgumentException("Leave request email is required");target.setLeaveRequestEmail(settings.leaveRequestEmail());}
         Employee saved=employees.save(target);cache.evict(id);return Summary.of(saved);
     }
 }

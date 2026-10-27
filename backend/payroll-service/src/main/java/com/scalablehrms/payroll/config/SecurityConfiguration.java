@@ -73,7 +73,7 @@ public class SecurityConfiguration {
                 .requestMatchers(HttpMethod.GET,"/actuator/health","/api/payroll/health").permitAll()
                 .requestMatchers("/actuator/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST,"/api/payroll","/api/payroll/calculate").hasAnyRole("HR","ADMIN")
-                .requestMatchers(HttpMethod.GET,"/api/payroll/**").authenticated()
+                .requestMatchers(HttpMethod.GET,"/api/payroll/**").hasAnyRole("EMPLOYEE","MANAGER","HR","ADMIN")
                 .anyRequest().denyAll())
             .exceptionHandling(errors->errors.authenticationEntryPoint(unauthorized).accessDeniedHandler(forbidden))
             .oauth2ResourceServer(oauth->oauth.authenticationEntryPoint(unauthorized).accessDeniedHandler(forbidden)

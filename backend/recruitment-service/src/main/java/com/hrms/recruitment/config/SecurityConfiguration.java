@@ -72,6 +72,7 @@ public class SecurityConfiguration {
                 .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
                 .requestMatchers(HttpMethod.GET,"/actuator/health","/api/jobs","/api/jobs/*","/s/*","/demo-jobs/**").permitAll()
                 .requestMatchers(HttpMethod.POST,"/api/candidates","/api/applications").permitAll()
+                .requestMatchers(HttpMethod.GET,"/api/applications/me").authenticated()
                 .requestMatchers("/api/storage/**").hasRole("ADMIN")
                 .requestMatchers("/api/jobs","/api/jobs/**","/api/candidates","/api/applications","/api/applications/**",
                     "/api/shorten","/api/crawler/**","/api/notifications").hasAnyRole("HR","ADMIN")

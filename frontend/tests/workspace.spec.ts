@@ -10,14 +10,14 @@ async function login(page: Page, email: string) {
   await page.goto('/login'); await page.getByLabel('Work email', { exact: true }).fill(email);
   await page.getByLabel('Password', { exact: false }).first().fill(password!);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByRole('heading', { name: /^Good / })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^Good /, level: 1 })).toBeVisible();
 }
 const nextDay = () => { const day = new Date(); day.setDate(day.getDate() + 24); while ([0, 6].includes(day.getDay())) day.setDate(day.getDate() + 1); return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`; };
 
 test('employee requests half a day, manager approves, employee cancels and balance is refunded', async ({ page }) => {
   await login(page, 'employee@example.test');
   await page.getByRole('link', { name: 'Time off', exact: true }).click();
-  await page.getByRole('button', { name: 'Request time off', exact: true }).click();
+  await page.locator('.page-heading').getByRole('button', { name: 'Request time off', exact: true }).click();
   const dialog = page.getByRole('dialog'); await expect(dialog).toBeVisible();
   const day = nextDay(); await dialog.getByLabel('From', { exact: true }).fill(day); await dialog.getByLabel('Until', { exact: true }).fill(day);
   await dialog.getByLabel('How much of the day?').selectOption('MORNING'); await dialog.getByLabel('A short note').fill('Browser workflow half-day request');
@@ -31,14 +31,14 @@ test('employee requests half a day, manager approves, employee cancels and balan
   await page.getByRole('dialog').getByRole('button', { name: 'Approve leave', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Confirm approval' }).click(); await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.getByRole('button', { name: 'Sign out', exact: true }).click(); await login(page, 'employee@example.test');
-  await expect(page.locator('.balance-ring strong')).toHaveText('19.5');
+  await page.goto('/leave'); await expect(page.locator('.leave-balance-card').first()).toContainText('19.5');
   await page.getByRole('link', { name: 'Time off', exact: true }).click();
   await page.getByRole('row').filter({ hasText: 'Morning' }).filter({ hasText: 'Approved' }).getByRole('button').first().click();
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel this request' }).click();
   await page.getByLabel('Reason for cancellation').fill('Plans changed after browser verification');
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel request', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('link', { name: 'Overview', exact: true }).click(); await expect(page.locator('.balance-ring strong')).toHaveText('20');
+  await page.reload(); await expect(page.locator('.leave-balance-card').first()).toContainText('20');
 });
 
 test('admin adds a colleague and reporting manager through the actual forms', async ({ page }) => {
@@ -97,7 +97,7 @@ test('desktop pages and modal keyboard focus are accessible; screenshots are cap
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
     expect.soft(results.violations.map(value => ({ id: value.id, nodes: value.nodes.map(node => ({ target: node.target, summary: node.failureSummary })) })), path).toEqual([]);
   }
-  await page.goto('/leave'); await page.getByRole('button', { name: 'Request time off', exact: true }).click();
+  await page.goto('/leave'); await page.locator('.page-heading').getByRole('button', { name: 'Request time off', exact: true }).click();
   for (let i = 0; i < 15; i++) { await page.keyboard.press('Tab'); expect(await page.locator('dialog[open]').evaluate(node => node.contains(document.activeElement))).toBe(true); }
   await page.keyboard.press('Escape'); await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.goto('/'); await expect(page.locator('.stat-card').first()).toContainText('Our people');
@@ -114,8 +114,55 @@ test('mobile navigation, forms and public careers stay within the viewport', asy
   }
   await page.goto('/'); await page.getByRole('button', { name: 'Open navigation' }).click();
   await page.getByRole('link', { name: 'Time off', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Time off', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Request time off', exact: true }).click();
+  await page.locator('.page-heading').getByRole('button', { name: 'Request time off', exact: true }).click();
   expect(await page.getByRole('dialog').evaluate(node => node.getBoundingClientRect().width <= innerWidth)).toBe(true);
   await page.keyboard.press('Escape'); await page.goto('/'); await page.screenshot({ path: resolve('../.runtime/alder-mobile.png'), fullPage: true });
   await page.goto('/careers'); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
+test('a real SSE approval immediately opens a popup and retains the Inbox item', async ({ page, browser }) => {
+  await login(page, 'employee@example.test');
+  const stream = page.waitForResponse(response => response.url().includes('/notifications/stream') && response.status() === 200);
+  await page.reload(); await stream;
+  const day = new Date(); day.setDate(day.getDate() + 80); while ([0, 6].includes(day.getDay())) day.setDate(day.getDate() + 1);
+  const date = day.toLocaleDateString('en-CA');
+  const leave = await page.evaluate(async ({ date }) => {
+    const session = JSON.parse(sessionStorage.getItem('alder.session')!);
+    const response = await fetch('/api/leaves', { method: 'POST', headers: { Authorization: 'Bearer ' + session.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'CASUAL', startDate: date, endDate: date, reason: 'Live approval popup verification' }) });
+    if (!response.ok) throw new Error(await response.text()); return response.json();
+  }, { date });
+  await page.goto('/notifications');
+  const context = await browser.newContext({ baseURL: process.env.ALDER_E2E_BASE_URL || 'http://127.0.0.1:5173', reducedMotion: 'reduce' });
+  try {
+    const manager = await context.newPage(); await login(manager, 'manager@example.test');
+    await manager.goto('/leave?tab=approvals');
+    await manager.getByRole('row').filter({ hasText: 'Casual' }).getByRole('button').first().click();
+    await manager.getByRole('dialog').getByRole('button', { name: 'Approve leave', exact: true }).click();
+    await manager.getByRole('dialog').getByRole('button', { name: 'Confirm approval' }).click();
+    const popup = page.getByRole('dialog', { name: 'Your leave is approved' });
+    await expect(popup).toBeVisible({ timeout: 12000 });
+    await page.screenshot({ path: resolve('../.runtime/alder-approval-popup.png'), fullPage: false });
+    await expect(popup.getByText('This update is saved in your Inbox, so you can return to it later.')).toBeVisible();
+    await popup.getByRole('button', { name: 'Got it' }).click(); await expect(popup).not.toBeVisible();
+    await expect(page.locator('.notification-row').filter({ hasText: 'Your leave request was approved' }).first()).toBeVisible();
+    await page.evaluate(async (id) => { const session = JSON.parse(sessionStorage.getItem('alder.session')!); await fetch('/api/leaves/me/' + id + '/cancel', { method: 'POST', headers: { Authorization: 'Bearer ' + session.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Live popup test complete; restore balance' }) }); }, leave.id);
+  } finally { await context.close(); }
+});
+
+test('job seeker gets a public company workspace; senior leader requests own leave by email', async ({ page }) => {
+  await login(page, 'applicant@example.test');
+  await expect(page.getByRole('heading', { name: 'Good people. Thoughtful work. Room to grow.' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'People', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Time off', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Payroll', exact: true })).toHaveCount(0);
+  await page.getByRole('link', { name: 'My applications', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'My applications', exact: true })).toBeVisible();
+  await expect(page.getByRole('row').filter({ hasText: 'Submitted' })).toHaveCount(1);
+  await page.goto('/leave'); await expect(page).toHaveURL(/\/$/);
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await login(page, 'leader@example.test'); await page.getByRole('link', { name: 'Time off', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Leave arrangements for your position' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Request time off', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Email HR', exact: true }).first()).toHaveAttribute('href', /^mailto:leave@alder.example/);
+  await expect(page.locator('.leave-balance-card').first()).toContainText('20');
 });
