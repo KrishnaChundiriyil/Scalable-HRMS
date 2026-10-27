@@ -29,7 +29,7 @@ export function useLiveNotifications() {
                 seen.add(id); if (seen.size > 200) seen.delete(seen.values().next().value!);
                 try { const data = JSON.parse(event.match(/^data:\s*(.+)$/m)?.[1] || '{}'); if (data.message === 'Your leave request was approved') window.dispatchEvent(new CustomEvent('alder-leave-approved', { detail: data })); else if (typeof data.message === 'string') toast(data.message); } catch { /* Persisted Inbox remains the source of truth. */ }
               }
-              client.invalidateQueries({ queryKey: ['notifications'] }); client.invalidateQueries({ queryKey: ['leave'] });
+              client.invalidateQueries({ queryKey: ['notifications'] }); client.invalidateQueries({ queryKey: ['leave'] }); client.invalidateQueries({ queryKey: ['recent-activity'] });
             }
           }
         }

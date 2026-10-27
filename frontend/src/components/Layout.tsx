@@ -24,7 +24,7 @@ export function Layout() {
   const links = candidate ? [{ to: '/', title: 'Overview', icon: Grid2X2 }, { to: '/hiring', title: 'Opportunities', icon: BriefcaseBusiness }, { to: '/applications', title: 'My applications', icon: FileText }] : [
     { to: '/', title: 'Overview', icon: Grid2X2 }, { to: '/people', title: 'People', icon: Users },
     { to: '/leave', title: 'Time off', icon: CalendarDays }, { to: '/payroll', title: 'Payroll', icon: Wallet },
-    { to: '/hiring', title: hr ? 'Hiring' : 'Opportunities', icon: BriefcaseBusiness }, { to: '/notifications', title: 'Inbox', icon: Bell },
+    { to: '/hiring', title: hr ? 'Hiring' : 'Opportunities', icon: BriefcaseBusiness }, { to: '/applications', title: 'My applications', icon: FileText }, { to: '/notifications', title: 'Inbox', icon: Bell },
   ];
   const section = [...links, { to: '/account', title: 'My account' }, { to: '/admin', title: 'Administration' }].find(item => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to))?.title || 'Workspace';
   useEffect(() => { document.title = section + ' · Alder & Co.'; }, [section]);

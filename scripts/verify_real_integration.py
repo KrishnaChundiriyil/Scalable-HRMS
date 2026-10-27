@@ -135,6 +135,7 @@ def main():
 
     try:
         mongo_port = container("mongo:7", 27017)
+        mongo_name = containers[-1]
         redis_port = container("redis:7-alpine", 6379)
         kafka_port=kafka_container() if options.with_recruitment else None
         employee_port, leave_port = free_port(), free_port()
@@ -429,6 +430,43 @@ def main():
             request(employee_base,'/api/internal/employees/'+senior['employeeId']+'/leave-settings',admin,{'emailOnlyLeave':True,'leaveRequestEmail':'leave@alder.example'},'PUT')
             request(leave_base,'/api/leaves',senior_token,body,'POST',403)
             check(request(leave_base,balance_path,senior_token)['annual']['remaining']==20,'most senior leader can view balances but must email HR instead of submitting for approval')
+            # Feed rows are account-scoped, persisted separately and expire after exactly 48 hours.
+            def activity(base, path, token, title):
+                for attempt in range(30):
+                    rows=request(base,path,token)
+                    found=next((row for row in rows if row['title']==title),None)
+                    if found:return found
+                    time.sleep(0.1)
+                raise AssertionError('Missing recent activity: '+title)
+            request(employee_base,f'/api/employees/{employee_id}',employee_token,
+                    {'name':employee['name'],'department':'Engineering','jobTitle':'Engineer','phone':'1234567890'},'PUT')
+            profile_activity=activity(employee_base,'/api/employee-activity/me',employee_token,'Updated your profile')
+            created=dt.datetime.fromisoformat(profile_activity['createdAt'].replace('Z','+00:00'))
+            expires=dt.datetime.fromisoformat(profile_activity['expiresAt'].replace('Z','+00:00'))
+            check(expires-created==dt.timedelta(hours=48),'profile activity persists with an exact 48-hour visibility window')
+            activity(leave_base,'/api/leaves/me/activity',employee_token,'Submitted a leave request')
+            activity(leave_base,'/api/leaves/me/activity',employee_token,'Your leave was approved')
+            check(True,'personal overview combines own leave actions and received approval updates')
+            activity(payroll_base,'/api/payroll/me/activity',hr_token,'Created a monthly payroll record')
+            activity(recruitment_base,'/api/recruitment-activity/me',hr_token,'Published a job opportunity')
+            activity(recruitment_base,'/api/recruitment-activity/me',candidate_token,'Submitted a job application')
+            check(True,'Payroll and Recruitment successful actions appear in the authenticated actor feed')
+            check(request(payroll_base,'/api/payroll/me/activity',employee_token)==[], 'creating payroll does not expose the HR activity feed to employees')
+            check(request(recruitment_base,'/api/recruitment-activity/me',employee_token)==[], 'employee feed cannot expose candidate or HR recruitment actions')
+            for base,path in [(employee_base,'/api/employee-activity/me'),(leave_base,'/api/leaves/me/activity'),(payroll_base,'/api/payroll/me/activity'),(recruitment_base,'/api/recruitment-activity/me')]:
+                request(base,path,expected=403 if base==employee_base else 401)
+            request(leave_base,'/api/leaves/me/activity',candidate_token,expected=403)
+            request(payroll_base,'/api/payroll/me/activity',candidate_token,expected=403)
+            check(True,'activity endpoints require authentication and preserve candidate/staff boundaries')
+            inject="""const d=db.getSiblingDB('hrms_employee_integration');
+                d.recent_activity.insertMany([
+                  {_id:'expired-fixture',actorId:ACTOR,title:'Expired update',source:'People',href:'/account',createdAt:new Date(Date.now()-172800001),expiresAt:new Date(Date.now()-1)},
+                  {_id:'other-account-fixture',actorId:'other-person',title:'Private other update',source:'People',href:'/account',createdAt:new Date(),expiresAt:new Date(Date.now()+172800000)}
+                ]);print(JSON.stringify(d.recent_activity.getIndexes()));""".replace('ACTOR',json.dumps(employee_id))
+            indexes=docker('exec',mongo_name,'mongosh','--quiet','--eval',inject)
+            rows=request(employee_base,'/api/employee-activity/me?actorId=other-person',employee_token)
+            check({row['id'] for row in rows}.isdisjoint({'expired-fixture','other-account-fixture'}) and any(row['id']==profile_activity['id'] for row in rows),'Mongo query excludes expired activity and ignores attempts to select another account')
+            check(any(index.get('expireAfterSeconds')==0 and 'expiresAt' in index['key'] for index in json.loads(indexes)), 'Mongo TTL cleans up transient activity without touching permanent domain records')
             if options.frontend:
                 ui_port=free_port()
                 targets=logs/'services.json'

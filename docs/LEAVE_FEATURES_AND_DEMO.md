@@ -116,3 +116,11 @@ python3 scripts/demo_sse.py
 The script uses the private sample credentials, opens Rohan's real stream, creates a future request, approves it as Ananya and prints the actual `leave-update` event. It then cancels the sample request to refund the approved day. It never prints JWTs or passwords.
 
 SSE is an in-app connection: the browser must be signed in and open to receive a live popup. Notifications remain in the durable Inbox when the stream is closed. Browser push notifications and SMTP delivery are separate integrations.
+
+## Personal Overview activity
+
+Overview keeps its company introduction and adds **Your recent activity**, private to the signed-in account. Successful profile/reporting edits, leave submissions/reviews/cancellations, payroll creation, job publishing/applications/status changes, and recruitment administration appear for **48 hours from the action**. Received leave approval/rejection and review notifications also appear for 48 hours from their notification time. Login, browsing, previews, failed actions and marking notifications read do not add noise.
+
+Each service stores its own transient activity in MongoDB with an expiry index. APIs and the open page also filter expiry explicitly, so visibility does not depend on the database cleanup schedule. The Overview refreshes every 30 seconds, after app mutations, on focus and on a live leave event. The underlying profile, leave, payslip, application, audit and Inbox records keep their normal retention.
+
+Employees may apply for published opportunities as internal applicants using their existing account. **Opportunities** identifies this as internal mobility; **My applications** is available to staff as well as job seekers. An application does not change employment or reporting details. HR/Admin can use **Apply internally** in a role's details while retaining the hiring management tools.

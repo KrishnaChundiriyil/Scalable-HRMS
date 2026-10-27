@@ -15,6 +15,8 @@ async function login(page: Page, email: string) {
 const nextDay = () => { const day = new Date(); day.setDate(day.getDate() + 24); while ([0, 6].includes(day.getDay())) day.setDate(day.getDate() + 1); return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`; };
 
 test('employee requests half a day, manager approves, employee cancels and balance is refunded', async ({ page }) => {
+  // The outbox may deliver the approval just after the employee signs back in.
+  await page.addLocatorHandler(page.getByRole('dialog', { name: 'Your leave is approved' }), async popup => { await popup.getByRole('button', { name: 'Got it', exact: true }).click(); });
   await login(page, 'employee@example.test');
   await page.getByRole('link', { name: 'Time off', exact: true }).click();
   await page.locator('.page-heading').getByRole('button', { name: 'Request time off', exact: true }).click();
@@ -167,4 +169,34 @@ test('job seeker gets a public company workspace; senior leader requests own lea
   await expect(page.getByRole('button', { name: 'Request time off', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Email HR', exact: true }).first()).toHaveAttribute('href', /^mailto:leave@alder.example/);
   await expect(page.locator('.leave-balance-card').first()).toContainText('20');
+});
+
+test('employees apply internally and see private, persistent recent activity on Overview', async ({ page }) => {
+  await login(page, 'employee@example.test');
+  await page.getByRole('link', { name: 'Opportunities', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Internal opportunities', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'View Java Engineer', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Apply for this role' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText(/You’re applying as a current employee/)).toBeVisible();
+  await dialog.getByLabel('Resume file').setInputFiles({ name: 'internal-resume.txt', mimeType: 'text/plain', buffer: Buffer.from('Current employee internal mobility application') });
+  await dialog.getByRole('button', { name: 'Send application' }).click();
+  await expect(dialog.getByText('Application received.', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Back to opportunities' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'My applications', exact: true }).click();
+  await expect(page.getByRole('row').filter({ hasText: 'Java Engineer' })).toContainText('Submitted');
+  await page.getByRole('link', { name: 'Overview', exact: true }).click();
+  const activity = page.getByRole('region', { name: 'Your recent activity', exact: true });
+  await expect(activity.getByText('Submitted a job application', { exact: true })).toBeVisible();
+  await expect(activity.getByText('Last 48 hours', { exact: true })).toBeVisible();
+  await expect(activity.getByText('Published a job opportunity', { exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(activity.getByText('Submitted a job application', { exact: true })).toBeVisible();
+  await activity.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve('../.runtime/alder-recent-activity.png'), fullPage: false });
+  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
+  expect(results.violations.map(value => value.id)).toEqual([]);
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await login(page, 'manager@example.test');
+  await expect(activity.getByText('Submitted a job application', { exact: true })).toHaveCount(0);
 });

@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy } from 'react';
 import type { ReactNode } from 'react';
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth, useRoles } from './lib/auth';
 import { ApiError } from './lib/api';
 import { ToastProvider, Loading } from './components/ui';
@@ -22,7 +22,7 @@ const MyApplications = lazy(() => import('./pages/Hiring').then(module => ({ def
 const Notifications = lazy(() => import('./pages/Notifications').then(module => ({ default: module.NotificationsPage })));
 const Admin = lazy(() => import('./pages/Admin').then(module => ({ default: module.AdminPage })));
 const Help = lazy(() => import('./pages/Admin').then(module => ({ default: module.HelpPage })));
-const client = new QueryClient({ defaultOptions: { queries: { staleTime: 20000, refetchOnWindowFocus: false, retry: (count, error) => count < 1 && !(error instanceof ApiError && [400, 401, 403, 404].includes(error.status)) }, mutations: { retry: false } } });
+const client = new QueryClient({ mutationCache: new MutationCache({ onSuccess: () => { void client.invalidateQueries({ queryKey: ['recent-activity'] }); } }), defaultOptions: { queries: { staleTime: 20000, refetchOnWindowFocus: false, retry: (count, error) => count < 1 && !(error instanceof ApiError && [400, 401, 403, 404].includes(error.status)) }, mutations: { retry: false } } });
 
 function Protected({ children, admin = false, staff = false }: { children: ReactNode; admin?: boolean; staff?: boolean }) {
   const { session } = useAuth(); const roles = useRoles();
