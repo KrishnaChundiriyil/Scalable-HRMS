@@ -5,3 +5,9 @@
 **/target
 **/__pycache__
 *.log
+.runtime
+archive
+**/node_modules
+**/dist
+**/test-results
+**/playwright-report

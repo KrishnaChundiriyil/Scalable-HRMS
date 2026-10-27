@@ -11,6 +11,9 @@ defaults = {
     'HRMS_JWT_SECRET_BASE64': base64.b64encode(secrets.token_bytes(48)).decode(),
     'EMPLOYEE_SERVICE_INTERNAL_TOKEN': secrets.token_urlsafe(40),
     'SPRING_PROFILES_ACTIVE': 'dev',
+    'HRMS_BOOTSTRAP_ADMIN_ENABLED': 'true',
+    'HRMS_ADMIN_EMAIL': 'admin@alder.local',
+    'HRMS_ADMIN_PASSWORD': secrets.token_urlsafe(20),
 }
 missing = {key: value for key, value in defaults.items() if key not in present}
 if missing:

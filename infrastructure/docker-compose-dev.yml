@@ -28,7 +28,7 @@ services:
     profiles: ["app"]
     build:
       context: ..
-      dockerfile: leave-service/Dockerfile
+      dockerfile: backend/leave-service/Dockerfile
     ports:
       - "127.0.0.1:8081:8081"
     depends_on:
@@ -79,7 +79,7 @@ services:
     profiles: ["recruitment"]
     build:
       context: ..
-      dockerfile: recruitment-service/Dockerfile
+      dockerfile: backend/recruitment-service/Dockerfile
     ports:
       - "127.0.0.1:8084:8084"
     depends_on:
@@ -109,7 +109,7 @@ services:
   payroll-service:
     profiles: ["payroll"]
     build:
-      context: ../payroll-service
+      context: ../backend/payroll-service
     ports:
       - "127.0.0.1:8083:8083"
     depends_on:

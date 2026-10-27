@@ -1,7 +1,7 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /build
-COPY recruitment-service/pom.xml pom.xml
-COPY recruitment-service/src src
+COPY backend/recruitment-service/pom.xml pom.xml
+COPY backend/recruitment-service/src src
 RUN mvn -B --no-transfer-progress -Dmaven.test.skip=true package
 
 FROM eclipse-temurin:21-jre-jammy

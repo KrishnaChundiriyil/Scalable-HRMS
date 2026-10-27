@@ -11,3 +11,9 @@
 .pytest_cache/
 __pycache__/
 .DS_Store
+**/node_modules/
+**/dist/
+.runtime/
+frontend/test-results/
+frontend/playwright-report/
+**/*.tsbuildinfo

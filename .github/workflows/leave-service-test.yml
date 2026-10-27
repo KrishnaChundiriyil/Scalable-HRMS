@@ -1,21 +1,27 @@
-name: HRMS backend integration tests
+name: HRMS workspace tests
 on:
   push:
     paths:
-      - 'leave-service/**'
-      - 'person1-employee-service/**'
-      - 'recruitment-service/**'
-      - 'payroll-service/**'
+      - 'frontend/**'
+      - 'pom.xml'
+      - 'scripts/dev.py'
+      - 'backend/leave-service/**'
+      - 'backend/employee-service/**'
+      - 'backend/recruitment-service/**'
+      - 'backend/payroll-service/**'
       - 'jmeter/**'
       - 'infrastructure/**'
       - 'scripts/verify_real_integration.py'
       - '.github/workflows/leave-service-test.yml'
   pull_request:
     paths:
-      - 'leave-service/**'
-      - 'person1-employee-service/**'
-      - 'recruitment-service/**'
-      - 'payroll-service/**'
+      - 'frontend/**'
+      - 'pom.xml'
+      - 'scripts/dev.py'
+      - 'backend/leave-service/**'
+      - 'backend/employee-service/**'
+      - 'backend/recruitment-service/**'
+      - 'backend/payroll-service/**'
       - 'jmeter/**'
       - 'infrastructure/**'
       - 'scripts/verify_real_integration.py'
@@ -23,9 +29,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build frontend and install test browser
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ../.runtime/browsers
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
       - name: Validate combined service configuration
         run: |
           docker compose --env-file .env.example -f infrastructure/docker-compose-dev.yml --profile recruitment --profile payroll config --quiet
@@ -37,21 +56,21 @@ jobs:
           java-version: '21'
           cache: maven
           cache-dependency-path: |
-            leave-service/pom.xml
-            person1-employee-service/pom.xml
-            recruitment-service/pom.xml
-            payroll-service/pom.xml
+            backend/leave-service/pom.xml
+            backend/employee-service/pom.xml
+            backend/recruitment-service/pom.xml
+            backend/payroll-service/pom.xml
       - name: Verify unit and MongoDB/Redis integration tests
-        working-directory: leave-service
+        working-directory: backend/leave-service
         run: mvn -B --no-transfer-progress clean verify
       - name: Verify final Employee module
-        working-directory: person1-employee-service
+        working-directory: backend/employee-service
         run: mvn -B --no-transfer-progress clean verify
       - name: Verify Recruitment module
-        working-directory: recruitment-service
+        working-directory: backend/recruitment-service
         run: mvn -B --no-transfer-progress clean verify
       - name: Verify Payroll module
-        working-directory: payroll-service
+        working-directory: backend/payroll-service
         run: mvn -B --no-transfer-progress clean verify
-      - name: Verify all four services with Kafka and load-balanced Payroll
-        run: python3 scripts/verify_real_integration.py --with-recruitment --with-payroll
+      - name: Verify all services and browser workflows
+        run: python3 scripts/verify_real_integration.py --frontend

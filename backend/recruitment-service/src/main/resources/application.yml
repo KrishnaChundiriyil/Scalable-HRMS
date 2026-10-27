@@ -29,7 +29,7 @@ spring:
   servlet:
     multipart:
       max-file-size: 5MB
-      max-request-size: 5MB
+      max-request-size: 6MB
 app:
   base-url: ${RECRUITMENT_BASE_URL:http://localhost:8084}
   storage:

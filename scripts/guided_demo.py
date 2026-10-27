@@ -74,7 +74,7 @@ def main():
     if not employee or not manager:
         raise RuntimeError("Set DEMO_EMPLOYEE_ID and DEMO_MANAGER_ID to existing Employee Service identities. "
                            "The manager must be assigned to the employee. For self-contained tests without "
-                           "Employee Service, run: cd leave-service && mvn clean verify")
+                           "Employee Service, run: cd backend/leave-service && mvn clean verify")
     suffix = str(time.time_ns())
     emp_token, mgr_token = token(employee, "EMPLOYEE"), token(manager, "MANAGER")
     day = dt.date.today() + dt.timedelta(days=7)

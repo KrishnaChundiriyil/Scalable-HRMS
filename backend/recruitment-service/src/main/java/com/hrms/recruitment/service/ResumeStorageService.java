@@ -78,4 +78,13 @@ public class ResumeStorageService {
         for (int i = 0; i < keys; i++) d.merge(ring.getNode("key-" + i), 1L, Long::sum);
         return d;
     }
+
+    /** Resolve a stored resume without allowing paths or symlinks outside this store. */
+    public Path resumePath(JobApplication application) throws IOException {
+        if(application.getStoredPath()==null)throw new java.nio.file.NoSuchFileException("Resume is unavailable");
+        Path path=Paths.get(application.getStoredPath()).toRealPath();
+        if(!path.startsWith(root.toRealPath())||!Files.isRegularFile(path))
+            throw new java.nio.file.NoSuchFileException("Resume is unavailable");
+        return path;
+    }
 }

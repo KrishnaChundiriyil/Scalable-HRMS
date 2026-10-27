@@ -73,6 +73,20 @@ public class ApplicationController {
         return jobId == null ? apps.findAll() : apps.findByJobId(jobId);
     }
 
+    @GetMapping("/applications/{id}/resume")
+    public ResponseEntity<org.springframework.core.io.Resource> resume(@PathVariable String id) throws Exception {
+        JobApplication application=apps.findById(id).orElseThrow(()->new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND,"Application not found"));
+        try {
+            var path=storage.resumePath(application);
+            String name=Objects.requireNonNullElse(application.getResumeFileName(),"resume").replaceAll("[\\r\\n]","");
+            return ResponseEntity.ok().contentType(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM)
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,org.springframework.http.ContentDisposition.attachment().filename(name,java.nio.charset.StandardCharsets.UTF_8).build().toString())
+                .contentLength(java.nio.file.Files.size(path)).body(new org.springframework.core.io.FileSystemResource(path));
+        } catch(java.nio.file.NoSuchFileException missing) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND,"Resume is unavailable");
+        }
+    }
+
     @PutMapping("/applications/{id}/status")
     public ResponseEntity<?> status(@PathVariable String id, @RequestBody Map<String, String> body) {
         return apps.findById(id).map(a -> {

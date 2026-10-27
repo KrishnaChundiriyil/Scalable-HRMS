@@ -1,7 +1,7 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /build
-COPY leave-service/pom.xml pom.xml
-COPY leave-service/src src
+COPY backend/leave-service/pom.xml pom.xml
+COPY backend/leave-service/src src
 RUN mvn -B --no-transfer-progress -Dmaven.test.skip=true package
 
 FROM eclipse-temurin:21-jre-jammy

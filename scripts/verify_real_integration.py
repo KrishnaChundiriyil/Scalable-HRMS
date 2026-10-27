@@ -28,7 +28,11 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--with-recruitment',action='store_true',help='Also verify Recruitment using a real Kafka broker')
     parser.add_argument('--with-payroll',action='store_true',help='Also verify three Payroll instances through Nginx')
+    parser.add_argument('--frontend',action='store_true',help='Run browser workflows against these real disposable services')
     options=parser.parse_args()
+    if options.frontend:
+        options.with_recruitment=True
+        options.with_payroll=True
     logs = Path(tempfile.mkdtemp(prefix="hrms-real-integration-"))
     processes, containers, files = [], [], []
     checks = 0
@@ -79,7 +83,7 @@ def main():
     def start(module, jar, env,label=None):
         output = (logs / f"{label or module}.log").open("w")
         files.append(output)
-        process = subprocess.Popen(["java", "-Xms64m", "-Xmx384m", "-jar", str(ROOT / module / "target" / jar)],
+        process = subprocess.Popen(["java", "-Xms64m", "-Xmx384m", "-jar", str(ROOT / "backend" / ("employee-service" if module == "person1-employee-service" else module) / "target" / jar)],
                                    cwd=logs, env=env, stdout=output, stderr=subprocess.STDOUT)
         processes.append(process)
         return process
@@ -285,6 +289,12 @@ def main():
             application=request(recruitment_base,'/api/applications',data=b''.join(parts),method='POST',content_type='multipart/form-data; boundary='+boundary)
             original_path=Path(application['storedPath'])
             check(application['status']=='SUBMITTED' and original_path.is_relative_to(logs/'resumes') and original_path.read_bytes()==resume,'public application stores the actual resume using the consistent hash ring')
+            resume_url='/api/applications/'+application['id']+'/resume'
+            request(recruitment_base,resume_url,expected=401)
+            request(recruitment_base,resume_url,employee_token,expected=403)
+            resume_request=urllib.request.Request(recruitment_base+resume_url,headers={'Authorization':'Bearer '+hr_token})
+            with urllib.request.urlopen(resume_request,timeout=10) as response:
+                check(response.read()==resume and 'attachment' in response.headers['Content-Disposition'],'only active HR/Admin can download the actual resume')
             request(recruitment_base,'/api/applications',expected=401)
             request(recruitment_base,'/api/applications',employee_token,expected=403)
             check(request(recruitment_base,'/api/applications?jobId='+job['id'],hr_token)[0]['id']==application['id'],'application lists are private to HR/Admin')
@@ -379,6 +389,26 @@ def main():
             request(payroll_base,'/api/payroll/calculate',hr_token,pay,'POST',403)
             request(employee_base,hr_settings,admin,{'active':True},'PUT')
             check(True,'inactive employees and HR lose Payroll access immediately')
+            if options.frontend:
+                ui_port=free_port()
+                targets=logs/'services.json'
+                targets.write_text(json.dumps({'employee':employee_base,'leave':leave_base,'payroll':payroll_base,'recruitment':recruitment_base}))
+                ui_env=dict(env,ALDER_RUNTIME_FILE=str(targets),FRONTEND_PORT=str(ui_port),
+                    ALDER_E2E_BASE_URL=f'http://127.0.0.1:{ui_port}',ALDER_E2E_PASSWORD=password,
+                    ALDER_E2E_EMPLOYEE_ID=employee_id,ALDER_E2E_PAY_PERIOD=f'{year}-{day.month:02d}',
+                    PLAYWRIGHT_BROWSERS_PATH=str(ROOT/'.runtime/browsers'))
+                output=(logs/'frontend.log').open('w');files.append(output)
+                ui_process=subprocess.Popen(['npm','run','preview'],cwd=ROOT/'frontend',env=ui_env,stdout=output,stderr=subprocess.STDOUT)
+                processes.append(ui_process)
+                deadline=time.monotonic()+45
+                while time.monotonic()<deadline:
+                    try:
+                        with urllib.request.urlopen(f'http://127.0.0.1:{ui_port}',timeout=3) as response:
+                            if response.status==200:break
+                    except OSError:time.sleep(0.5)
+                else:raise RuntimeError('Frontend did not start')
+                subprocess.run(['npm','run','test:e2e'],cwd=ROOT/'frontend',env=ui_env,check=True)
+                check(True,'real browser workflows, role boundaries, mobile layout and accessibility pass')
             leave_process.terminate();leave_process.wait(timeout=20)
             request(payroll_base,summary_path,hr_token,expected=503)
             check(request(payroll_base,path,employee_token)['netSalary']==33000,'Leave outage blocks leave summaries while existing payslips remain available')
